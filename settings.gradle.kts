@@ -10,3 +10,4 @@
 rootProject.name = "dc2f-edit-api"
 
 includeBuild("./deps/dc2f.kt")
+includeBuild("./deps/finalyzer-dc2f-site")
