@@ -1,0 +1,3 @@
+[submodule "deps/dc2f.kt"]
+	path = deps/dc2f.kt
+	url = https://github.com/dc2f/dc2f.kt.git
