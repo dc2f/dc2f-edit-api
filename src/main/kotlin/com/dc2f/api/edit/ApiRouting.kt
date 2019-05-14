@@ -1,6 +1,6 @@
 package com.dc2f.api.edit
 
-import app.anlage.site.contentdef.*
+import app.anlage.site.contentdef.WebsiteFolderContent
 import com.dc2f.*
 import com.dc2f.api.edit.dto.ApiDto
 import com.dc2f.util.isJavaType
@@ -17,10 +17,11 @@ import io.ktor.response.*
 import io.ktor.routing.*
 import io.ktor.util.KtorExperimentalAPI
 import mu.KotlinLogging
+import java.lang.reflect.Modifier
 import java.nio.file.Files
 import kotlin.reflect.*
 import kotlin.reflect.full.*
-import kotlin.reflect.jvm.javaType
+import kotlin.reflect.jvm.*
 
 private val logger = KotlinLogging.logger {}
 
@@ -28,6 +29,12 @@ private val logger = KotlinLogging.logger {}
 private val <R> KProperty<R>.isMultiValue: Boolean
     get() =
         (returnType.classifier as? KClass<*>)?.isSubclassOf(Collection::class) == true
+
+private val <R> KProperty<R>.isTransient: Boolean
+    get() =
+        javaField?.modifiers?.let {
+            Modifier.isTransient(it)
+        } == true
 
 class UnknownClass
 
@@ -50,6 +57,12 @@ private val <R> KProperty<R>.elementJavaClass: Class<*>
 
 @KtorExperimentalAPI
 fun Route.apiRouting(deps: Deps<*>) {
+    val typeReflectionCache =
+        mutableMapOf<KClass<out ContentDef>, ContentDefReflection<out ContentDef>>()
+
+    fun <T : ContentDef> reflectionForType(clazz: KClass<out T>) =
+        typeReflectionCache.computeIfAbsent(clazz) { ContentDefReflection(it) }
+
     get("/") {
         call.respondText("Hello world.")
     }
@@ -61,10 +74,16 @@ fun Route.apiRouting(deps: Deps<*>) {
                     ?: "/"
             val parameters = call.parameters
 
+            val contentPath = ContentPath.parse(path)
+
             val content =
-                deps.context.contentByPath[ContentPath.parse(path)]
+                deps.context.contentByPath[contentPath]
                     ?: throw NotFoundException("Unable to find rootContent by path.")
-            val metadata = deps.content.metadata.childrenMetadata[content]
+            val metadata = if (deps.content.metadata.path == contentPath) {
+                deps.content.metadata
+            } else {
+                deps.content.metadata.childrenMetadata[content]
+            }
                 ?: throw NotFoundException("Unable to find metadata.")
             val fsPath = requireNotNull(metadata.fsPath)
             val om = jacksonObjectMapper()
@@ -74,6 +93,18 @@ fun Route.apiRouting(deps: Deps<*>) {
             val tree = ObjectMapper(YAMLFactory()).readTree(Files.readAllBytes(fsPath))
             val root = om.createObjectNode()
 
+            root.set(
+                "breadcrumbs",
+                om.valueToTree(
+                    generateSequence(contentPath) {
+                        it.takeUnless(ContentPath::isRoot)?.parent()
+                    }
+                        .map { mapOf("name" to it.name, "path" to it.toString()) }
+                        .toList()
+                        .reversed()
+                )
+            )
+//            root.set("breadcrumbs", contentPath.parent())
             root.set("content", tree)
             root.set("children", om.createObjectNode().also { obj ->
                 obj.setAll(metadata.directChildren.mapValues {
@@ -89,7 +120,7 @@ fun Route.apiRouting(deps: Deps<*>) {
                 })
             })
 
-            val reflection = ContentDefReflection(content::class)
+            val reflection = reflectionForType(content::class)
             root.set("reflection", om.valueToTree(reflection))
 
             root.set("types",
@@ -100,7 +131,7 @@ fun Route.apiRouting(deps: Deps<*>) {
                         .distinct()
                         .map {
                             @Suppress("UNCHECKED_CAST")
-                            it to ContentDefReflection(Class.forName(it).kotlin as KClass<ContentDef>)
+                            it to reflectionForType(Class.forName(it).kotlin as KClass<ContentDef>)
                         }
                         .toMap()
                 )
@@ -120,44 +151,59 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
     @JsonIgnore
     val contentLoader = ContentLoader(klass)
 
-    val properties
-        get() = klass.memberProperties.filter { !it.returnType.isJavaType }.map { prop ->
-            val elementJavaClass = prop.elementJavaClass
-            if (ContentDef::class.java.isAssignableFrom(prop.elementJavaClass)) {
-                if (elementJavaClass.kotlin.companionObjectInstance is Parsable<*>) {
-                    ContentDefPropertyReflectionParsable(
+    val properties by lazy {
+        klass.memberProperties.filter { !it.returnType.isJavaType }
+            .filter { prop ->
+                if (!prop.isLateinit) {
+                    true
+                } else {
+                    if (!prop.isTransient) {
+                        throw IllegalArgumentException("a lateinit field must be marked as transient.")
+                    }
+                    false
+                }
+            }
+            .map { prop ->
+                val elementJavaClass = prop.elementJavaClass
+                if (ContentDef::class.java.isAssignableFrom(prop.elementJavaClass)) {
+                    if (elementJavaClass.kotlin.companionObjectInstance is Parsable<*>) {
+                        ContentDefPropertyReflectionParsable(
+                            prop.name,
+                            prop.returnType.isMarkedNullable,
+                            prop.isMultiValue,
+                            elementJavaClass.name
+                        )
+                    } else {
+                        ContentDefPropertyReflectionNested(
+                            prop.name,
+                            prop.returnType.isMarkedNullable,
+                            prop.isMultiValue,
+                            (contentLoader.findChildTypesForProperty(prop.name)?.map { type ->
+                                type.key to type.value.name
+                            }?.toMap() ?: emptyMap()) + findPropertyTypesFor(
+                                prop,
+                                elementJavaClass
+                            ),
+                            elementJavaClass.name
+                        )
+                    }
+                } else if (Map::class.java.isAssignableFrom(elementJavaClass)) {
+                    ContentDefPropertyReflectionMap(
                         prop.name,
                         prop.returnType.isMarkedNullable,
                         prop.isMultiValue,
-                        elementJavaClass.name
+                        requireNotNull(prop.returnType.arguments[1].type?.javaType?.typeName)
                     )
                 } else {
-                    ContentDefPropertyReflectionNested(
+                    ContentDefPropertyReflectionPrimitive(
                         prop.name,
                         prop.returnType.isMarkedNullable,
                         prop.isMultiValue,
-                        (contentLoader.findChildTypesForProperty(prop.name)?.map { type ->
-                            type.key to type.value.name
-                        }?.toMap() ?: emptyMap()) + findPropertyTypesFor(prop, elementJavaClass),
-                        elementJavaClass.name
+                        PrimitiveType.fromJavaClass(elementJavaClass)
                     )
                 }
-            } else if (Map::class.java.isAssignableFrom(elementJavaClass)) {
-                ContentDefPropertyReflectionMap(
-                    prop.name,
-                    prop.returnType.isMarkedNullable,
-                    prop.isMultiValue,
-                    requireNotNull(prop.returnType.arguments[1].type?.javaType?.typeName)
-                )
-            } else {
-                ContentDefPropertyReflectionPrimitive(
-                    prop.name,
-                    prop.returnType.isMarkedNullable,
-                    prop.isMultiValue,
-                    PrimitiveType.fromJavaClass(elementJavaClass)
-                )
             }
-        }
+    }
 
     private fun findPropertyTypesFor(property: KProperty<*>, clazz: Class<*>) =
         contentLoader.findPropertyTypes().filter { clazz.isAssignableFrom(it.value.java) }
@@ -170,12 +216,13 @@ sealed class ContentDefPropertyReflection(
     val optional: Boolean,
     val multiValue: Boolean
 ) {
-    val kind get() = when(this) {
-        is ContentDefPropertyReflectionParsable -> "Parsable"
-        is ContentDefPropertyReflectionPrimitive -> "Primitive"
-        is ContentDefPropertyReflectionMap -> "Map"
-        is ContentDefPropertyReflectionNested -> "Nested"
-    }
+    val kind
+        get() = when (this) {
+            is ContentDefPropertyReflectionParsable -> "Parsable"
+            is ContentDefPropertyReflectionPrimitive -> "Primitive"
+            is ContentDefPropertyReflectionMap -> "Map"
+            is ContentDefPropertyReflectionNested -> "Nested"
+        }
 }
 
 class ContentDefPropertyReflectionPrimitive(
@@ -186,11 +233,12 @@ class ContentDefPropertyReflectionPrimitive(
 enum class PrimitiveType(val clazz: KClass<*>) {
     Boolean(kotlin.Boolean::class),
     String(kotlin.String::class),
-//    Integer(Integer::class),
+    //    Integer(Integer::class),
     ZonedDateTime(java.time.ZonedDateTime::class),
     Unknown(Any::class)
 
     ;
+
     companion object {
         fun fromJavaClass(elementJavaClass: Class<*>): PrimitiveType {
             val kotlinClazz = elementJavaClass.kotlin
