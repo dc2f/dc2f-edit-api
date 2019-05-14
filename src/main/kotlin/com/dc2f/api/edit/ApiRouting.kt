@@ -105,6 +105,9 @@ fun Route.apiRouting(deps: Deps<*>) {
                 )
             )
 //            root.set("breadcrumbs", contentPath.parent())
+            val reflection = reflectionForType(content::class)
+            root.set("reflection", om.valueToTree(reflection))
+
             root.set("content", tree)
             root.set("children", om.createObjectNode().also { obj ->
                 obj.setAll(metadata.directChildren.mapValues {
@@ -114,14 +117,17 @@ fun Route.apiRouting(deps: Deps<*>) {
                             om.createObjectNode().apply {
                                 put("path", contentDefChild.loadedContent.metadata.path.toString())
                                 put("isProperty", contentDefChild.isProperty)
+                                val prop = reflection.property[key]
+                                if (prop != null) {
+                                    if (prop is ContentDefPropertyReflectionParsable) {
+                                        put("rawContent", (contentDefChild.loadedContent.content as ParsableContentDef).rawContent())
+                                    }
+                                }
                             }
                         })
                     }
                 })
             })
-
-            val reflection = reflectionForType(content::class)
-            root.set("reflection", om.valueToTree(reflection))
 
             root.set("types",
                 om.valueToTree(
@@ -151,6 +157,9 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
     @JsonIgnore
     val contentLoader = ContentLoader(klass)
 
+    val property by lazy {
+        properties.map { it.name to it }.toMap()
+    }
     val properties by lazy {
         klass.memberProperties.filter { !it.returnType.isJavaType }
             .filter { prop ->
