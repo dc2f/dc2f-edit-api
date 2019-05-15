@@ -1,8 +1,10 @@
 package com.dc2f.api.edit
 
-import app.anlage.site.contentdef.WebsiteFolderContent
+import app.anlage.site.FinalyzerTheme
+import app.anlage.site.contentdef.*
 import com.dc2f.*
 import com.dc2f.api.edit.dto.ApiDto
+import com.dc2f.render.*
 import com.dc2f.util.isJavaType
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.core.JsonGenerator
@@ -13,10 +15,12 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.ktor.application.call
 import io.ktor.features.NotFoundException
+import io.ktor.http.ContentType
 import io.ktor.response.*
 import io.ktor.routing.*
 import io.ktor.util.KtorExperimentalAPI
 import mu.KotlinLogging
+import java.io.StringWriter
 import java.lang.reflect.Modifier
 import java.nio.file.Files
 import kotlin.reflect.*
@@ -67,6 +71,29 @@ fun Route.apiRouting(deps: Deps<*>) {
         call.respondText("Hello world.")
     }
     route("/api") {
+        get("/render/{path...}") {
+            val path =
+                call.parameters.getAll("path")?.joinToString("/")
+                    ?: "/"
+            val contentPath = ContentPath.parse(path)
+
+            val content =
+                deps.context.contentByPath[contentPath]
+                    ?: throw NotFoundException("Unable to find rootContent by path.")
+
+            val out = StringWriter()
+            SinglePageStreamRenderer(
+                FinalyzerTheme(),
+                deps.context,
+                (deps.rootContent!!.content as FinalyzerWebsite).config.url,
+                AppendableOutput(out)
+            ).renderContent(
+                content,
+                requireNotNull(deps.content.metadata.childrenMetadata[content]),
+                null,
+                OutputType.html)
+            call.respondText(out.toString(), ContentType.Text.Html)
+        }
         get("/reflect/{path...}") {
             logger.debug { "Got request. ${call.parameters.getAll("path")}" }
             val path =

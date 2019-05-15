@@ -1,0 +1,15 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="com.dc2f.api.edit.AppKt" type="JetRunConfigurationType" factoryName="Kotlin" nameIsGenerated="true">
+    <module name="dc2f-edit-api.main" />
+    <option name="VM_PARAMETERS" value="" />
+    <option name="PROGRAM_PARAMETERS" value="" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="false" />
+    <option name="ALTERNATIVE_JRE_PATH" />
+    <option name="PASS_PARENT_ENVS" value="true" />
+    <option name="MAIN_CLASS_NAME" value="com.dc2f.api.edit.AppKt" />
+    <option name="WORKING_DIRECTORY" value="file://deps/finalyzer-dc2f-site" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
