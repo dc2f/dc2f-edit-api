@@ -10,12 +10,15 @@ import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.databind.*
 import com.fasterxml.jackson.databind.module.SimpleModule
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.databind.ser.BeanSerializerModifier
+import com.fasterxml.jackson.databind.util.JSONPObject
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import io.ktor.application.call
+import io.ktor.application.*
 import io.ktor.features.NotFoundException
 import io.ktor.http.ContentType
+import io.ktor.request.receive
 import io.ktor.response.*
 import io.ktor.routing.*
 import io.ktor.util.KtorExperimentalAPI
@@ -59,10 +62,42 @@ private val <R> KProperty<R>.elementJavaClass: Class<*>
             "Return Type is not a class: $returnType / ${returnType.javaType} (of property $this)"
         }
 
+private val om = jacksonObjectMapper()
+    .also { it.configureObjectMapper() }
+    .registerModule(SimpleModule().setSerializerModifier(ContentDefSerializerModifier()))
+
+@ApiDto
+data class ReflectTypeResponse(
+    val types: Map<String, ContentDefReflection<*>>
+)
+
 @KtorExperimentalAPI
 fun Route.apiRouting(deps: Deps<*>) {
     val typeReflectionCache =
         mutableMapOf<KClass<out ContentDef>, ContentDefReflection<out ContentDef>>()
+
+    fun dataForCall(call: ApplicationCall): Pair<ContentDef, ContentDefMetadata> {
+        logger.debug { "Got request. ${call.parameters.getAll("path")}" }
+        val path =
+            call.parameters.getAll("path")?.joinToString("/")
+                ?: "/"
+
+        val contentPath = ContentPath.parse(path)
+
+        val content =
+            deps.context.contentByPath[contentPath]
+                ?: throw NotFoundException("Unable to find rootContent by path.")
+        val metadata = if (deps.content.metadata.path == contentPath) {
+            deps.content.metadata
+        } else {
+            deps.content.metadata.childrenMetadata[content]
+        }
+            ?: throw NotFoundException("Unable to find metadata.")
+
+        require(metadata.path == contentPath)
+
+        return content to metadata
+    }
 
     fun <T : ContentDef> reflectionForType(clazz: KClass<out T>) =
         typeReflectionCache.computeIfAbsent(clazz) { ContentDefReflection(it) }
@@ -72,14 +107,7 @@ fun Route.apiRouting(deps: Deps<*>) {
     }
     route("/api") {
         get("/render/{path...}") {
-            val path =
-                call.parameters.getAll("path")?.joinToString("/")
-                    ?: "/"
-            val contentPath = ContentPath.parse(path)
-
-            val content =
-                deps.context.contentByPath[contentPath]
-                    ?: throw NotFoundException("Unable to find rootContent by path.")
+            val (content, _) = dataForCall(call)
 
             val out = StringWriter()
             SinglePageStreamRenderer(
@@ -94,28 +122,28 @@ fun Route.apiRouting(deps: Deps<*>) {
                 OutputType.html)
             call.respondText(out.toString(), ContentType.Text.Html)
         }
+        get("/type/") {
+            val reflected = requireNotNull(call.request.queryParameters.getAll("type"))
+                .map { className ->
+                    @Suppress("UNCHECKED_CAST")
+                    val clazz = Class.forName(className).kotlin as KClass<out ContentDef>
+                    require(clazz.isSubclassOf(ContentDef::class)) {
+                        "We only allow reflection of subclasses of ContentDef"
+                    }
+                    className to reflectionForType(clazz = clazz)
+                }
+                .toMap()
+            call.respond(om.writeValueAsString(ReflectTypeResponse(reflected)))
+        }
         get("/reflect/{path...}") {
-            logger.debug { "Got request. ${call.parameters.getAll("path")}" }
-            val path =
-                call.parameters.getAll("path")?.joinToString("/")
-                    ?: "/"
-            val parameters = call.parameters
 
-            val contentPath = ContentPath.parse(path)
-
-            val content =
-                deps.context.contentByPath[contentPath]
-                    ?: throw NotFoundException("Unable to find rootContent by path.")
-            val metadata = if (deps.content.metadata.path == contentPath) {
-                deps.content.metadata
-            } else {
-                deps.content.metadata.childrenMetadata[content]
+            val (content, metadata) = dataForCall(call)
+            val contentDefClass = requireNotNull(metadata.contentDefClass)
+            require(contentDefClass.isInstance(content)) {
+                "content must be an instance of $contentDefClass - actual: $content, ${content::class}"
             }
-                ?: throw NotFoundException("Unable to find metadata.")
+
             val fsPath = requireNotNull(metadata.fsPath)
-            val om = jacksonObjectMapper()
-                .also { it.configureObjectMapper() }
-                .registerModule(SimpleModule().setSerializerModifier(ContentDefSerializerModifier()))
 
             val tree = ObjectMapper(YAMLFactory()).readTree(Files.readAllBytes(fsPath))
             val root = om.createObjectNode()
@@ -123,7 +151,7 @@ fun Route.apiRouting(deps: Deps<*>) {
             root.set(
                 "breadcrumbs",
                 om.valueToTree(
-                    generateSequence(contentPath) {
+                    generateSequence(metadata.path) {
                         it.takeUnless(ContentPath::isRoot)?.parent()
                     }
                         .map { mapOf("name" to it.name, "path" to it.toString()) }
@@ -132,7 +160,7 @@ fun Route.apiRouting(deps: Deps<*>) {
                 )
             )
 //            root.set("breadcrumbs", contentPath.parent())
-            val reflection = reflectionForType(content::class)
+            val reflection = reflectionForType(contentDefClass)
             root.set("reflection", om.valueToTree(reflection))
 
             root.set("content", tree)
@@ -175,8 +203,78 @@ fun Route.apiRouting(deps: Deps<*>) {
 //            call.respond(om.writeValueAsString(InspectDto(rootContent)))
             call.respond(om.writeValueAsString(root))
         }
+
+        patch("/update/{path...}") {
+            val (content, metadata) = dataForCall(call)
+            val reflection = reflectionForType(content::class)
+            val modification = call.receive<ContentModification>()
+            val fsPath = requireNotNull(metadata.fsPath)
+            val yamlObjectMapper = ObjectMapper(YAMLFactory())
+            val jsonRootNode = yamlObjectMapper.readTree(Files.readAllBytes(fsPath)) as ObjectNode
+            var jsonRootNodeChanged = false
+
+            fun saveProperty(prop: ContentDefPropertyReflection, value: Any): Boolean {
+                val key = prop.name
+                metadata.directChildren[key]?.let {
+                    if (prop is ContentDefPropertyReflectionParsable) {
+                        // we only support single value parsable values right now.
+                        require(!prop.multiValue)
+                        it.first().loadedContent.metadata.fsPath?.let { fsPath ->
+                            logger.debug { "Writing property $key into $fsPath" }
+                            Files.write(fsPath, value.toString().toByteArray())
+                            return true
+                        }
+                    }
+                }
+                if (prop is ContentDefPropertyReflectionPrimitive) {
+                    require(!prop.multiValue)
+                    when (prop.type) {
+                        PrimitiveType.Boolean -> jsonRootNode.put(prop.name, value as Boolean)
+                        PrimitiveType.String -> jsonRootNode.put(prop.name, value as String)
+                        PrimitiveType.ZonedDateTime -> TODO() //jsonRootNode.put(prop.)
+                        PrimitiveType.Unknown -> TODO()
+                    }
+                    jsonRootNodeChanged = true
+                    return true
+                }
+                if (prop is ContentDefPropertyReflectionNested) {
+                    require(!prop.multiValue)
+                    jsonRootNode.set(prop.name, value as ObjectNode)
+                    jsonRootNodeChanged = true
+                    return true
+                }
+                return false
+            }
+
+            val remaining = modification.updates.fields().asSequence().filterNot { entry ->
+                saveProperty(requireNotNull(reflection.property[entry.key]), entry.value)
+            }.map { it.key to it.value }.toMap()
+//            val remaining = modification.updates.filterNot { (key, value) ->
+//                saveProperty(requireNotNull(reflection.property[key]), value)
+//            }
+
+            if (jsonRootNodeChanged) {
+                Files.write(fsPath, yamlObjectMapper.writeValueAsBytes(jsonRootNode))
+            }
+
+            logger.debug { "Properties not saved $remaining" }
+
+            deps.reload()
+
+            call.respond(om.writeValueAsString(
+                mapOf(
+                    "status" to "ok",
+                    "unsaved" to remaining.keys
+                )
+            ))
+        }
     }
 }
+
+@ApiDto
+data class ContentModification(
+    val updates: ObjectNode
+)
 
 @ApiDto
 class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
@@ -203,6 +301,9 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
                 val elementJavaClass = prop.elementJavaClass
                 if (ContentDef::class.java.isAssignableFrom(prop.elementJavaClass)) {
                     if (elementJavaClass.kotlin.companionObjectInstance is Parsable<*>) {
+                        require(!prop.isMultiValue) {
+                            "MultiValue parsable values are not (yet) supported. ${klass}::${prop.name}"
+                        }
                         ContentDefPropertyReflectionParsable(
                             prop.name,
                             prop.returnType.isMarkedNullable,
@@ -235,10 +336,11 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
                         prop.name,
                         prop.returnType.isMarkedNullable,
                         prop.isMultiValue,
-                        PrimitiveType.fromJavaClass(elementJavaClass)
+                        PrimitiveType.fromJavaClass(elementJavaClass, "${klass}::${prop.name}")
                     )
                 }
             }
+            .sortedBy { it.name }
     }
 
     private fun findPropertyTypesFor(property: KProperty<*>, clazz: Class<*>) =
@@ -276,11 +378,11 @@ enum class PrimitiveType(val clazz: KClass<*>) {
     ;
 
     companion object {
-        fun fromJavaClass(elementJavaClass: Class<*>): PrimitiveType {
+        fun fromJavaClass(elementJavaClass: Class<*>, debugMessage: kotlin.String): PrimitiveType {
             val kotlinClazz = elementJavaClass.kotlin
             val type = PrimitiveType.values().find { it.clazz == kotlinClazz }
             if (type == null) {
-                logger.error { "UNKNOWN PrimitiveType: $kotlinClazz" }
+                logger.error { "UNKNOWN PrimitiveType: $kotlinClazz ($debugMessage)" }
                 return Unknown
             }
             return type

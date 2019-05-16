@@ -29,4 +29,8 @@ class Deps<T: ContentDef>(val dc2fEditApiConfig: ApplicationConfig, private val 
             logger.debug { "Loaded website $loadedWebsite" }
         }
     }
+
+    fun reload() {
+        loadContent()
+    }
 }
