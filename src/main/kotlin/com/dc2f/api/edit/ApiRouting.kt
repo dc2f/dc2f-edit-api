@@ -340,7 +340,8 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
                     )
                 }
             }
-            .sortedBy { it.name }
+            .sortedWith(compareBy({ it.optional }, { it.name }))
+//            .sortedBy { it.name }
     }
 
     private fun findPropertyTypesFor(property: KProperty<*>, clazz: Class<*>) =
@@ -398,7 +399,7 @@ class ContentDefPropertyReflectionParsable(
 
 class ContentDefPropertyReflectionMap(
     name: String, optional: Boolean, multiValue: Boolean,
-    val mapValue: String
+    val mapValueType: String
 ) : ContentDefPropertyReflection(name, optional, multiValue)
 
 class ContentDefPropertyReflectionNested(
