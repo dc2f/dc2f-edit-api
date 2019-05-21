@@ -5,25 +5,25 @@ import app.anlage.site.contentdef.*
 import com.dc2f.*
 import com.dc2f.api.edit.dto.ApiDto
 import com.dc2f.render.*
-import com.dc2f.util.isJavaType
+import com.dc2f.util.*
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.databind.*
 import com.fasterxml.jackson.databind.module.SimpleModule
-import com.fasterxml.jackson.databind.node.ObjectNode
+import com.fasterxml.jackson.databind.node.*
 import com.fasterxml.jackson.databind.ser.BeanSerializerModifier
-import com.fasterxml.jackson.databind.util.JSONPObject
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.*
 import io.ktor.application.*
 import io.ktor.features.NotFoundException
 import io.ktor.http.ContentType
-import io.ktor.request.receive
+import io.ktor.http.content.*
+import io.ktor.request.*
 import io.ktor.response.*
 import io.ktor.routing.*
 import io.ktor.util.KtorExperimentalAPI
 import mu.KotlinLogging
-import java.io.StringWriter
+import java.io.*
 import java.lang.reflect.Modifier
 import java.nio.file.Files
 import kotlin.reflect.*
@@ -42,6 +42,8 @@ private val <R> KProperty<R>.isTransient: Boolean
         javaField?.modifiers?.let {
             Modifier.isTransient(it)
         } == true
+
+private val yamlObjectMapper = ObjectMapper(YAMLFactory())
 
 class UnknownClass
 
@@ -70,6 +72,17 @@ private val om = jacksonObjectMapper()
 data class ReflectTypeResponse(
     val types: Map<String, ContentDefReflection<*>>
 )
+
+@ApiDto
+class CreateTransaction(
+    val path: String,
+    val contentPath: String
+) {
+
+    @get:JsonIgnore
+    val contentPathValue
+        get() = ContentPath.parse(contentPath)
+}
 
 @KtorExperimentalAPI
 fun Route.apiRouting(deps: Deps<*>) {
@@ -119,7 +132,8 @@ fun Route.apiRouting(deps: Deps<*>) {
                 content,
                 requireNotNull(deps.content.metadata.childrenMetadata[content]),
                 null,
-                OutputType.html)
+                OutputType.html
+            )
             call.respondText(out.toString(), ContentType.Text.Html)
         }
         get("/type/") {
@@ -175,7 +189,10 @@ fun Route.apiRouting(deps: Deps<*>) {
                                 val prop = reflection.property[key]
                                 if (prop != null) {
                                     if (prop is ContentDefPropertyReflectionParsable) {
-                                        put("rawContent", (contentDefChild.loadedContent.content as ParsableContentDef).rawContent())
+                                        put(
+                                            "rawContent",
+                                            (contentDefChild.loadedContent.content as ParsableContentDef).rawContent()
+                                        )
                                     }
                                 }
                             }
@@ -204,44 +221,160 @@ fun Route.apiRouting(deps: Deps<*>) {
             call.respond(om.writeValueAsString(root))
         }
 
+        post("/createChild/begin/{path...}") {
+            val (content, metadata) = dataForCall(call)
+            val parentFsPath = requireNotNull(metadata.fsPath?.parent)
+            val create = call.receive<ContentCreate>()
+            val reflection = reflectionForType(content::class)
+            val prop = requireNotNull(reflection.property[create.property]) {
+                "Unknown property ${create.property} for type ${content::class}"
+            }
+            require(prop.multiValue) { "Currently we only support multi value properties." }
+            require(prop is ContentDefPropertyReflectionNested)
+
+            val siblings = prop.getValue(content)
+            val prefix = if (siblings != null && siblings is Collection<*>) {
+                val last = siblings.last() as ContentDef
+                val lastMetadata = requireNotNull(metadata.childrenMetadata[last])
+//                requireNotNull(lastMetadata.fsPath).fileName.toString().split('.')
+//                    .first()
+//                    .toIntOrNull()
+//                    ?.let { String.format("%03d.", it + 1) }
+                lastMetadata.comment?.toIntOrNull()?.let { String.format("%03d.", it + 1) }
+            } else {
+                "000."
+            }
+            val fileName = arrayOf(prefix, create.slug, ".", create.typeIdentifier).filterNotNull()
+                .joinToString("")
+            val directory = parentFsPath.resolve(fileName)
+            val relativeDirectory = deps.contentRootPath.relativize(directory)
+
+            Files.createDirectory(directory)
+            Files.write(
+                directory.resolve(INDEX_YAML_NAME),
+                yamlObjectMapper.writeValueAsBytes(create.content)
+            )
+            call.respond(
+                om.writeValueAsString(
+                    mapOf(
+                        "status" to "ok",
+                        "transaction" to deps.messageTransformer.transformWrite(
+                            om.writeValueAsString(
+                                CreateTransaction(
+                                    relativeDirectory.toString(),
+                                    metadata.path.child(create.slug).toString()
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        }
+        post("/createChild/upload/{path...}") {
+            val transactionValue = requireNotNull(call.request.header("x-transaction"))
+            val transaction = om.readValue<CreateTransaction>(
+                requireNotNull(
+                    deps.messageTransformer.transformRead(transactionValue)
+                )
+            )
+            val multipart = call.receiveMultipart()
+
+            val directory = deps.contentRootPath.resolve(transaction.path)
+
+            multipart.forEachPart { part ->
+                when (part) {
+                    is PartData.FileItem -> {
+                        val bareName = File(part.originalFileName).name
+                        val uploadFile = File(directory.toFile(), bareName)
+                        part.streamProvider().use { input ->
+                            uploadFile.outputStream().buffered().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                    is PartData.FormItem -> {
+                        logger.debug { "Got a form item? ${part.value}" }
+                    }
+                    else -> throw UnsupportedOperationException("We currently only support file items, got a $part")
+                }
+            }
+            call.respond(om.writeValueAsString(mapOf("status" to "ok")))
+        }
+
+        post("/createChild/commit") {
+            val transactionValue = requireNotNull(call.request.header("x-transaction"))
+            val transaction = om.readValue<CreateTransaction>(
+                requireNotNull(
+                    deps.messageTransformer.transformRead(transactionValue)
+                )
+            )
+            deps.reload()
+            call.respond(
+                om.writeValueAsString(
+                    mapOf(
+                        "status" to "ok",
+                        "path" to transaction.contentPath.toString()
+                    )
+                )
+            )
+        }
+
         patch("/update/{path...}") {
             val (content, metadata) = dataForCall(call)
             val reflection = reflectionForType(content::class)
             val modification = call.receive<ContentModification>()
             val fsPath = requireNotNull(metadata.fsPath)
-            val yamlObjectMapper = ObjectMapper(YAMLFactory())
+            val fsPathDirectory = fsPath.parent
             val jsonRootNode = yamlObjectMapper.readTree(Files.readAllBytes(fsPath)) as ObjectNode
+
             var jsonRootNodeChanged = false
 
-            fun saveProperty(prop: ContentDefPropertyReflection, value: Any): Boolean {
+            fun saveProperty(prop: ContentDefPropertyReflection, value: JsonNode): Boolean {
                 val key = prop.name
-                metadata.directChildren[key]?.let {
-                    if (prop is ContentDefPropertyReflectionParsable) {
+                when (prop) {
+                    is ContentDefPropertyReflectionParsable -> return metadata.directChildren[key]?.let { directChild ->
                         // we only support single value parsable values right now.
                         require(!prop.multiValue)
-                        it.first().loadedContent.metadata.fsPath?.let { fsPath ->
+                        directChild.first().loadedContent.metadata.fsPath?.let { fsPath ->
                             logger.debug { "Writing property $key into $fsPath" }
                             Files.write(fsPath, value.toString().toByteArray())
                             return true
                         }
+                    } ?: {
+                        if (jsonRootNode.has(prop.name)) {
+                            jsonRootNode.set(prop.name, value)
+                        } else {
+                            require(prop.parsableTypes.size == 1) { "Currently we don't support parsable types which are ambigious ($prop)" }
+                            val type = prop.parsableTypes.keys.single()
+                            Files.write(
+                                fsPathDirectory.resolve("@${prop.name}.$type"),
+                                value.toString().toByteArray()
+                            )
+                        }
+                        true
+                    }()
+                    is ContentDefPropertyReflectionPrimitive -> {
+                        if (prop.multiValue) {
+                            jsonRootNode.set(prop.name, value as ArrayNode)
+                        } else {
+                            jsonRootNode.set(prop.name, value)
+                            //                        require(!prop.multiValue)
+                            //                        when (prop.type) {
+                            //                            PrimitiveType.Boolean -> jsonRootNode.put(prop.name, value as Boolean)
+                            //                            PrimitiveType.String -> jsonRootNode.put(prop.name, value as String)
+                            //                            PrimitiveType.ZonedDateTime -> TODO() //jsonRootNode.put(prop.)
+                            //                            PrimitiveType.Unknown -> TODO()
+                            //                        }
+                        }
+                        jsonRootNodeChanged = true
+                        return true
                     }
-                }
-                if (prop is ContentDefPropertyReflectionPrimitive) {
-                    require(!prop.multiValue)
-                    when (prop.type) {
-                        PrimitiveType.Boolean -> jsonRootNode.put(prop.name, value as Boolean)
-                        PrimitiveType.String -> jsonRootNode.put(prop.name, value as String)
-                        PrimitiveType.ZonedDateTime -> TODO() //jsonRootNode.put(prop.)
-                        PrimitiveType.Unknown -> TODO()
+                    is ContentDefPropertyReflectionNested -> {
+                        require(!prop.multiValue)
+                        jsonRootNode.set(prop.name, value as ObjectNode)
+                        jsonRootNodeChanged = true
+                        return true
                     }
-                    jsonRootNodeChanged = true
-                    return true
-                }
-                if (prop is ContentDefPropertyReflectionNested) {
-                    require(!prop.multiValue)
-                    jsonRootNode.set(prop.name, value as ObjectNode)
-                    jsonRootNodeChanged = true
-                    return true
                 }
                 return false
             }
@@ -261,15 +394,33 @@ fun Route.apiRouting(deps: Deps<*>) {
 
             deps.reload()
 
-            call.respond(om.writeValueAsString(
-                mapOf(
-                    "status" to "ok",
-                    "unsaved" to remaining.keys
+            call.respond(
+                om.writeValueAsString(
+                    mapOf(
+                        "status" to "ok",
+                        "unsaved" to remaining.keys
+                    )
                 )
-            ))
+            )
         }
     }
 }
+
+data class ContentCreate(
+    /**
+     * The type identifier for the created content.
+     */
+    val typeIdentifier: String,
+    /**
+     * the name of the property in the parent under which to create the child.
+     */
+    val property: String,
+    /**
+     * The name of the new content.
+     */
+    val slug: String,
+    val content: ObjectNode
+)
 
 @ApiDto
 data class ContentModification(
@@ -304,23 +455,28 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
                         require(!prop.isMultiValue) {
                             "MultiValue parsable values are not (yet) supported. ${klass}::${prop.name}"
                         }
+                        val propertyTypes = findPropertyTypesFor(prop, elementJavaClass)
                         ContentDefPropertyReflectionParsable(
                             prop.name,
                             prop.returnType.isMarkedNullable,
                             prop.isMultiValue,
-                            elementJavaClass.name
+                            propertyTypes.keys.joinToString(","),
+                            propertyTypes
                         )
                     } else {
+                        elementJavaClass.kotlin.isAbstract
                         ContentDefPropertyReflectionNested(
                             prop.name,
                             prop.returnType.isMarkedNullable,
                             prop.isMultiValue,
                             (contentLoader.findChildTypesForProperty(prop.name)?.map { type ->
                                 type.key to type.value.name
-                            }?.toMap() ?: emptyMap()) + findPropertyTypesFor(
-                                prop,
-                                elementJavaClass
-                            ),
+                            }?.toMap() ?: emptyMap()) +
+                                // TODO i don't think this is necessary actually?
+                                findPropertyTypesFor(
+                                    prop,
+                                    elementJavaClass
+                                ).mapValues { it.value.java.name },
                             elementJavaClass.name
                         )
                     }
@@ -330,6 +486,21 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
                         prop.returnType.isMarkedNullable,
                         prop.isMultiValue,
                         requireNotNull(prop.returnType.arguments[1].type?.javaType?.typeName)
+                    )
+                } else if (BaseFileAsset::class.java.isAssignableFrom(elementJavaClass)) {
+                    ContentDefPropertyReflectionFileAsset(
+                        prop.name,
+                        prop.returnType.isMarkedNullable,
+                        prop.isMultiValue,
+                        ImageAsset::class.java.isAssignableFrom(elementJavaClass)
+                            .then { ContentDefPropertyReflectionFileAsset.Type.Image }
+                            ?: ContentDefPropertyReflectionFileAsset.Type.File
+                    )
+                } else if (ContentReference::class.java.isAssignableFrom(elementJavaClass)) {
+                    ContentDefPropertyReflectionContentReference(
+                        prop.name,
+                        prop.returnType.isMarkedNullable,
+                        prop.isMultiValue
                     )
                 } else {
                     ContentDefPropertyReflectionPrimitive(
@@ -346,7 +517,6 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
 
     private fun findPropertyTypesFor(property: KProperty<*>, clazz: Class<*>) =
         contentLoader.findPropertyTypes().filter { clazz.isAssignableFrom(it.value.java) }
-            .mapValues { it.value.java.name }
 }
 
 @ApiDto
@@ -355,12 +525,24 @@ sealed class ContentDefPropertyReflection(
     val optional: Boolean,
     val multiValue: Boolean
 ) {
+    fun getValue(content: ContentDef): Any? {
+        val property = requireNotNull(content::class.memberProperties.find { it.name == name }) {
+            "Unable to find member property $name on $content (${content::class})"
+        }
+        return property.getter.run {
+            isAccessible = true
+            call(content)
+        }
+    }
+
     val kind
         get() = when (this) {
             is ContentDefPropertyReflectionParsable -> "Parsable"
             is ContentDefPropertyReflectionPrimitive -> "Primitive"
             is ContentDefPropertyReflectionMap -> "Map"
             is ContentDefPropertyReflectionNested -> "Nested"
+            is ContentDefPropertyReflectionFileAsset -> "File"
+            is ContentDefPropertyReflectionContentReference -> "ContentReference"
         }
 }
 
@@ -394,7 +576,7 @@ enum class PrimitiveType(val clazz: KClass<*>) {
 
 class ContentDefPropertyReflectionParsable(
     name: String, optional: Boolean, multiValue: Boolean,
-    val parsableHint: String
+    val parsableHint: String, @JsonIgnore val parsableTypes: Map<String, KClass<out Any>>
 ) : ContentDefPropertyReflection(name, optional, multiValue)
 
 class ContentDefPropertyReflectionMap(
@@ -406,6 +588,21 @@ class ContentDefPropertyReflectionNested(
     name: String, optional: Boolean, multiValue: Boolean,
     val allowedTypes: Map<String, String>, val baseType: String
 ) : ContentDefPropertyReflection(name, optional, multiValue)
+
+class ContentDefPropertyReflectionFileAsset(
+    name: String, optional: Boolean, multiValue: Boolean,
+    val fileType: Type
+) : ContentDefPropertyReflection(name, optional, multiValue) {
+    enum class Type {
+        File,
+        Image
+    }
+}
+
+class ContentDefPropertyReflectionContentReference(
+    name: String, optional: Boolean, multiValue: Boolean
+) : ContentDefPropertyReflection(name, optional, multiValue)
+
 
 class ContentDefSerializer : JsonSerializer<ContentDef>() {
     override fun serialize(
