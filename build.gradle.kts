@@ -6,8 +6,8 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
  * This generated file contains a sample Kotlin application project to get you started.
  */
 
-val ktorVersion = "1.2.0-rc2"
-val jacksonVersion = "2.9.4"
+val ktorVersion = "1.2.0"
+val jacksonVersion = "2.9.9"
 
 plugins {
     // Apply the Kotlin JVM plugin to add support for Kotlin on the JVM.
@@ -45,12 +45,26 @@ dependencies {
     compile("com.fasterxml.jackson.core:jackson-annotations:$jacksonVersion")
     compile("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:$jacksonVersion")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:$jacksonVersion")
+    constraints {
+        compile("org.yaml:snakeyaml:1.24")
+        implementation("org.yaml:snakeyaml:1.24")
+    }
 
     // Use the Kotlin test library.
     testImplementation("org.jetbrains.kotlin:kotlin-test")
 
     // Use the Kotlin JUnit integration.
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
+}
+
+allprojects {
+    dependencies {
+        constraints {
+            compile("org.yaml:snakeyaml:1.24")
+            implementation("org.yaml:snakeyaml:1.24")
+        }
+
+    }
 }
 
 val compileKotlin by tasks.getting(KotlinCompile::class) {
