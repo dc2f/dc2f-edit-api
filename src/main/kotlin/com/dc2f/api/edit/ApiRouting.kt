@@ -414,7 +414,9 @@ private fun savePropertiesForContentDef(
                 return true
             }
             is ContentDefPropertyReflectionContentReference,
-            is ContentDefPropertyReflectionFileAsset -> jsonRootNode.set(
+            is ContentDefPropertyReflectionFileAsset,
+                // TODO maybe add some validation for enums?
+            is ContentDefPropertyReflectionEnum -> jsonRootNode.set(
                 prop.name,
                 value
             ).let { true }
@@ -468,8 +470,38 @@ data class ContentModification(
 @ApiDto
 class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
 
+    val type get() = klass.qualifiedName
+
+    val typeIdentifier: String? by lazy {
+        klass.findAnnotation<Nestable>()?.identifier
+    }
+
     @JsonIgnore
     val contentLoader = ContentLoader(klass)
+
+    val defaultValues by lazy {
+        if (!klass.isSubclassOf(ContentDef::class)) {
+            logger.debug("Discovered a class which is not a subclass of ContentDef. not reflecting default values. $klass")
+            return@lazy emptyMap<String, Any?>()
+        }
+        if (klass.isSealed) {
+            // sealed classes must not be used directly, but only their children.
+            logger.debug { "Discovered a sealed class. $klass" }
+            return@lazy emptyMap<String, Any?>()
+        }
+        val reader = ContentLoader.objectMapper.reader(object : InjectableValues() {
+            override fun findInjectableValue(
+                valueId: Any?,
+                ctxt: DeserializationContext?,
+                forProperty: BeanProperty?,
+                beanInstance: Any?
+            ): Any? = null
+        }).forType(klass.java)
+        val emptyInstance = reader.readValue<ContentDef>("{}")
+        properties.map { prop ->
+            prop.name to prop.getValue(emptyInstance)
+        }.filter { it.second != null }.toMap()
+    }
 
     val property by lazy {
         properties.map { it.name to it }.toMap()
@@ -478,7 +510,7 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
         klass.memberProperties.filter { !it.returnType.isJavaType }
             .filter { prop ->
                 if (!prop.isLateinit) {
-                    true
+                    prop.getter.findAnnotation<JsonIgnore>()?.value != true
                 } else {
                     if (!prop.isTransient) {
                         throw IllegalArgumentException("a lateinit field must be marked as transient.")
@@ -540,6 +572,16 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
                         prop.returnType.isMarkedNullable,
                         prop.isMultiValue
                     )
+                } else if (elementJavaClass.isEnum) {
+                    logger.debug("$elementJavaClass is an enum. ${elementJavaClass is Enum<*>} vs. ${elementJavaClass.kotlin is Enum<*>}")
+//                    logger.debug("$elementJavaClass is an enum. ${elementJavaClass is Enum<*>} vs. ${elementJavaClass.kotlin is Enum<*>}")
+
+                    ContentDefPropertyReflectionEnum(
+                        prop.name,
+                        prop.returnType.isMarkedNullable,
+                        prop.isMultiValue,
+                        elementJavaClass.enumConstants.map { (it as Enum<*>).name }
+                    )
                 } else {
                     ContentDefPropertyReflectionPrimitive(
                         prop.name,
@@ -564,7 +606,7 @@ sealed class ContentDefPropertyReflection(
     val multiValue: Boolean
 ) {
     fun getValue(content: ContentDef): Any? {
-        val property = requireNotNull(content::class.memberProperties.find { it.name == name }) {
+        val property = requireNotNull(content::class.memberProperties.find { it.name == name && !it.returnType.isJavaType }) {
             "Unable to find member property $name on $content (${content::class})"
         }
         return property.getter.run {
@@ -581,17 +623,24 @@ sealed class ContentDefPropertyReflection(
             is ContentDefPropertyReflectionNested -> "Nested"
             is ContentDefPropertyReflectionFileAsset -> "File"
             is ContentDefPropertyReflectionContentReference -> "ContentReference"
+            is ContentDefPropertyReflectionEnum -> "Enum"
         }
 }
+
+class ContentDefPropertyReflectionEnum(
+    name: String, optional: Boolean, multiValue: Boolean,
+    val enumValues: List<String>
+) : ContentDefPropertyReflection(name, optional, multiValue)
+
 
 class ContentDefPropertyReflectionPrimitive(
     name: String, optional: Boolean, multiValue: Boolean,
     val type: PrimitiveType
 ) : ContentDefPropertyReflection(name, optional, multiValue)
 
-enum class PrimitiveType(val clazz: KClass<*>) {
+enum class PrimitiveType(vararg val clazz: KClass<*>) {
     Boolean(kotlin.Boolean::class),
-    String(kotlin.String::class),
+    String(kotlin.String::class, Slug::class),
     //    Integer(Integer::class),
     ZonedDateTime(java.time.ZonedDateTime::class),
     Unknown(Any::class)
@@ -601,7 +650,7 @@ enum class PrimitiveType(val clazz: KClass<*>) {
     companion object {
         fun fromJavaClass(elementJavaClass: Class<*>, debugMessage: kotlin.String): PrimitiveType {
             val kotlinClazz = elementJavaClass.kotlin
-            val type = PrimitiveType.values().find { it.clazz == kotlinClazz }
+            val type = PrimitiveType.values().find { it.clazz.contains(kotlinClazz) }
             if (type == null) {
                 logger.error { "UNKNOWN PrimitiveType: $kotlinClazz ($debugMessage)" }
                 return Unknown
