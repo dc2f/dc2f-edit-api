@@ -3,8 +3,12 @@
  */
 package com.dc2f.api.edit
 
+import app.anlage.site.FinalyzerTheme
 import app.anlage.site.contentdef.FinalyzerWebsite
+import com.dc2f.Website
 import com.dc2f.api.edit.dto.ErrorResponse
+import com.dc2f.render.*
+import com.dc2f.util.Dc2fSetup
 import com.fasterxml.jackson.annotation.JsonFormat
 import com.fasterxml.jackson.databind.*
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
@@ -22,14 +26,16 @@ import io.ktor.util.KtorExperimentalAPI
 import org.slf4j.bridge.SLF4JBridgeHandler
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
+import kotlin.reflect.KClass
 
 private val logger = mu.KotlinLogging.logger {}
+
 
 @UseExperimental(KtorExperimentalAPI::class)
 fun Application.dc2fEditorApi() {
 
     val dc2fEditApiConfig = environment.config.config("dc2f")
-    val deps = Deps(dc2fEditApiConfig, FinalyzerWebsite::class)
+    val deps = Deps<Website<*>>(dc2fEditApiConfig)
 
     environment.monitor.subscribe(ApplicationStopping) {
         log.warn("Application is stopping. Closing connections.")
@@ -55,6 +61,10 @@ fun Application.installFeatures() {
             call.respond(HttpStatusCode.InternalServerError, ErrorResponse(cause.toString()))
         }
     }
+    install(CallLogging) {
+        filter { false }
+    }
+    install(CustomCallLogFeature)
     install(ContentNegotiation) {
         // sendBeacon() in chrome only allows sending text/plain or form data, so just treat it as json.
         val j = JacksonConverter(jacksonObjectMapper().also { it.configureObjectMapper() })

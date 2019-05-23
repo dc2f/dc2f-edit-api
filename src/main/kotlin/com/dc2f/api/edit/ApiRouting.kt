@@ -1,7 +1,6 @@
 package com.dc2f.api.edit
 
-import app.anlage.site.FinalyzerTheme
-import app.anlage.site.contentdef.*
+import app.anlage.site.contentdef.WebsiteFolderContent
 import com.dc2f.*
 import com.dc2f.api.edit.dto.ApiDto
 import com.dc2f.render.*
@@ -16,7 +15,7 @@ import com.fasterxml.jackson.dataformat.yaml.*
 import com.fasterxml.jackson.module.kotlin.*
 import io.ktor.application.*
 import io.ktor.features.NotFoundException
-import io.ktor.http.ContentType
+import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.request.*
 import io.ktor.response.*
@@ -123,20 +122,42 @@ fun Route.apiRouting(deps: Deps<*>) {
     get("/") {
         call.respondText("Hello world.")
     }
+    get("/static/{path...}") {
+        val path = call.parameters.getAll("path")?.joinToString("/")
+        val filePath = FileSystems.getDefault().getPath("./tmpDir").resolve(path)
+        if (Files.exists(filePath)) {
+            call.respondFile(filePath.toFile())
+        } else if (deps.staticDirectory != null) {
+            val fallback = FileSystems.getDefault().getPath(deps.staticDirectory).resolve(path)
+            call.respondFile(fallback.toFile())
+        } else {
+            logger.warn { "Unable to find static content $path" }
+            call.respond(HttpStatusCode.NotFound)
+        }
+    }
     route("/api") {
         get("/render/{path...}") {
-            val (content, _) = dataForCall(call)
+            val (content, metadata) = dataForCall(call)
 
             val out = StringWriter()
+            val urlConfigTmp = deps.urlConfig.run {
+                UrlConfig(
+                    protocol, host, "api/render/"
+                )
+            }
+            val urlConfig = object : UrlConfig(urlConfigTmp.protocol, urlConfigTmp.host, urlConfigTmp.pathPrefix) {
+                override val staticFilesPrefix: String
+                    get() = "static/"
+            }
             SinglePageStreamRenderer(
-                FinalyzerTheme(),
+                deps.setup.theme,
                 deps.context,
-                (deps.rootContent!!.content as FinalyzerWebsite).config.url,
-                AppendableOutput(out)
-            ).renderContent(
+                urlConfig,
+                AppendableOutput(out),
+                FileSystems.getDefault().getPath("./tmpDir")
+            ).renderRootContent(
                 content,
-                requireNotNull(deps.content.metadata.childrenMetadata[content]),
-                null,
+                metadata,
                 OutputType.html
             )
             call.respondText(out.toString(), ContentType.Text.Html)
@@ -164,7 +185,12 @@ fun Route.apiRouting(deps: Deps<*>) {
 
             val fsPath = requireNotNull(metadata.fsPath)
 
-            val tree = ObjectMapper(YAMLFactory()).readTree(Files.readAllBytes(fsPath))
+            val tree = if (!Files.exists(fsPath)) {
+                // for now _index.yml files are optional.
+                yamlObjectMapper.createObjectNode()
+            } else {
+                yamlObjectMapper.readTree(Files.readAllBytes(fsPath))
+            }
             val root = om.createObjectNode()
 
             root.set(
@@ -225,150 +251,151 @@ fun Route.apiRouting(deps: Deps<*>) {
 //            call.respond(om.writeValueAsString(InspectDto(rootContent)))
             call.respond(om.writeValueAsString(root))
         }
+    }
 
-        post("/createChild/begin/{path...}") {
-            val (content, metadata) = dataForCall(call)
-            val parentFsPath = requireNotNull(metadata.fsPath?.parent)
-            val create = call.receive<ContentCreate>()
-            val parentReflection = reflectionForType(content::class)
-            val prop = requireNotNull(parentReflection.property[create.property]) {
-                "Unknown property ${create.property} for type ${content::class}"
-            }
-            require(prop.multiValue) { "Currently we only support multi value properties." }
-            require(prop is ContentDefPropertyReflectionNested)
-            val type =
-                requireNotNull(prop.allowedTypes[create.typeIdentifier]) { "Invalid type identifier ${create.typeIdentifier} for ${prop.name} (types: ${prop.allowedTypes}" }
-            @Suppress("UNCHECKED_CAST")
-            val reflection = reflectionForType(Class.forName(type).kotlin as KClass<out ContentDef>)
+    post("/createChild/begin/{path...}") {
+        val (content, metadata) = dataForCall(call)
+        val parentFsPath = requireNotNull(metadata.fsPath?.parent)
+        val create = call.receive<ContentCreate>()
+        val parentReflection = reflectionForType(content::class)
+        val prop = requireNotNull(parentReflection.property[create.property]) {
+            "Unknown property ${create.property} for type ${content::class}"
+        }
+        require(prop.multiValue) { "Currently we only support multi value properties." }
+        require(prop is ContentDefPropertyReflectionNested)
+        val type =
+            requireNotNull(prop.allowedTypes[create.typeIdentifier]) { "Invalid type identifier ${create.typeIdentifier} for ${prop.name} (types: ${prop.allowedTypes}" }
+        @Suppress("UNCHECKED_CAST")
+        val reflection = reflectionForType(Class.forName(type).kotlin as KClass<out ContentDef>)
 
-            val siblings = prop.getValue(content)
-            val prefix = if (siblings != null && siblings is Collection<*>) {
-                val last = siblings.last() as ContentDef
-                val lastMetadata = requireNotNull(metadata.childrenMetadata[last])
+        val siblings = prop.getValue(content)
+        val prefix = if (siblings != null && siblings is Collection<*>) {
+            val last = siblings.last() as ContentDef
+            val lastMetadata = requireNotNull(metadata.childrenMetadata[last])
 //                requireNotNull(lastMetadata.fsPath).fileName.toString().split('.')
 //                    .first()
 //                    .toIntOrNull()
 //                    ?.let { String.format("%03d.", it + 1) }
-                lastMetadata.comment?.toIntOrNull()?.let { String.format("%03d.", it + 1) }
-            } else {
-                "000."
-            }
-            val fileName = arrayOf(prefix, create.slug, ".", create.typeIdentifier).filterNotNull()
-                .joinToString("")
-            val directory = parentFsPath.resolve(fileName)
-            val relativeDirectory = deps.contentRootPath.relativize(directory)
+            lastMetadata.comment?.toIntOrNull()?.let { String.format("%03d.", it + 1) }
+        } else {
+            "000."
+        }
+        val fileName = arrayOf(prefix, create.slug, ".", create.typeIdentifier).filterNotNull()
+            .joinToString("")
+        val directory = parentFsPath.resolve(fileName)
+        val relativeDirectory = deps.contentRootPath.relativize(directory)
 
-            Files.createDirectory(directory)
+        Files.createDirectory(directory)
 //            Files.write(
 //                directory.resolve(INDEX_YAML_NAME),
 //                yamlObjectMapper.writeValueAsBytes(create.content)
 //            )
 
-            savePropertiesForContentDef(
-                yamlObjectMapper.createObjectNode(),
-                directory,
-                create.content,
-                reflection,
-                directory.resolve(INDEX_YAML_NAME)
-            )
+        savePropertiesForContentDef(
+            yamlObjectMapper.createObjectNode(),
+            directory,
+            create.content,
+            reflection,
+            directory.resolve(INDEX_YAML_NAME)
+        )
 
-            call.respond(
-                om.writeValueAsString(
-                    mapOf(
-                        "status" to "ok",
-                        "transaction" to deps.messageTransformer.transformWrite(
-                            om.writeValueAsString(
-                                CreateTransaction(
-                                    relativeDirectory.toString(),
-                                    metadata.path.child(create.slug).toString()
-                                )
+        call.respond(
+            om.writeValueAsString(
+                mapOf(
+                    "status" to "ok",
+                    "transaction" to deps.messageTransformer.transformWrite(
+                        om.writeValueAsString(
+                            CreateTransaction(
+                                relativeDirectory.toString(),
+                                metadata.path.child(create.slug).toString()
                             )
                         )
                     )
                 )
             )
-        }
-        post("/createChild/upload/{path...}") {
-            val transactionValue = requireNotNull(call.request.header("x-transaction"))
-            val transaction = om.readValue<CreateTransaction>(
-                requireNotNull(
-                    deps.messageTransformer.transformRead(transactionValue)
-                )
+        )
+    }
+    post("/createChild/upload/{path...}") {
+        val transactionValue = requireNotNull(call.request.header("x-transaction"))
+        val transaction = om.readValue<CreateTransaction>(
+            requireNotNull(
+                deps.messageTransformer.transformRead(transactionValue)
             )
-            val multipart = call.receiveMultipart()
+        )
+        val multipart = call.receiveMultipart()
 
-            val directory = deps.contentRootPath.resolve(transaction.path)
+        val directory = deps.contentRootPath.resolve(transaction.path)
 
-            multipart.forEachPart { part ->
-                when (part) {
-                    is PartData.FileItem -> {
-                        val bareName = File(part.originalFileName).name
-                        val uploadFile = File(directory.toFile(), bareName)
-                        part.streamProvider().use { input ->
-                            uploadFile.outputStream().buffered().use { output ->
-                                input.copyTo(output)
-                            }
+        multipart.forEachPart { part ->
+            when (part) {
+                is PartData.FileItem -> {
+                    val bareName = File(part.originalFileName).name
+                    val uploadFile = File(directory.toFile(), bareName)
+                    part.streamProvider().use { input ->
+                        uploadFile.outputStream().buffered().use { output ->
+                            input.copyTo(output)
                         }
                     }
-                    is PartData.FormItem -> {
-                        logger.debug { "Got a form item? ${part.value}" }
-                    }
-                    else -> throw UnsupportedOperationException("We currently only support file items, got a $part")
                 }
+                is PartData.FormItem -> {
+                    logger.debug { "Got a form item? ${part.value}" }
+                }
+                else -> throw UnsupportedOperationException("We currently only support file items, got a $part")
             }
-            call.respond(om.writeValueAsString(mapOf("status" to "ok")))
         }
+        call.respond(om.writeValueAsString(mapOf("status" to "ok")))
+    }
 
-        post("/createChild/commit") {
-            val transactionValue = requireNotNull(call.request.header("x-transaction"))
-            val transaction = om.readValue<CreateTransaction>(
-                requireNotNull(
-                    deps.messageTransformer.transformRead(transactionValue)
+    post("/createChild/commit") {
+        val transactionValue = requireNotNull(call.request.header("x-transaction"))
+        val transaction = om.readValue<CreateTransaction>(
+            requireNotNull(
+                deps.messageTransformer.transformRead(transactionValue)
+            )
+        )
+        deps.reload()
+        call.respond(
+            om.writeValueAsString(
+                mapOf(
+                    "status" to "ok",
+                    "path" to transaction.contentPath.toString()
                 )
             )
-            deps.reload()
-            call.respond(
-                om.writeValueAsString(
-                    mapOf(
-                        "status" to "ok",
-                        "path" to transaction.contentPath.toString()
-                    )
+        )
+    }
+
+    patch("/update/{path...}") {
+        val (content, metadata) = dataForCall(call)
+        val reflection = reflectionForType(content::class)
+        val modification = call.receive<ContentModification>()
+        val updates = modification.updates
+        val fsPath = requireNotNull(metadata.fsPath)
+        val fsPathDirectory = fsPath.parent
+        val jsonRootNode = yamlObjectMapper.readTree(Files.readAllBytes(fsPath)) as ObjectNode
+
+        val remaining = savePropertiesForContentDef(
+            jsonRootNode,
+            fsPathDirectory,
+            updates,
+            reflection,
+            fsPath
+        )
+
+        logger.debug { "Properties not saved $remaining" }
+
+        deps.reload()
+
+        call.respond(
+            om.writeValueAsString(
+                mapOf(
+                    "status" to "ok",
+                    "unsaved" to remaining.keys
                 )
             )
-        }
-
-        patch("/update/{path...}") {
-            val (content, metadata) = dataForCall(call)
-            val reflection = reflectionForType(content::class)
-            val modification = call.receive<ContentModification>()
-            val updates = modification.updates
-            val fsPath = requireNotNull(metadata.fsPath)
-            val fsPathDirectory = fsPath.parent
-            val jsonRootNode = yamlObjectMapper.readTree(Files.readAllBytes(fsPath)) as ObjectNode
-
-            val remaining = savePropertiesForContentDef(
-                jsonRootNode,
-                fsPathDirectory,
-                updates,
-                reflection,
-                fsPath
-            )
-
-            logger.debug { "Properties not saved $remaining" }
-
-            deps.reload()
-
-            call.respond(
-                om.writeValueAsString(
-                    mapOf(
-                        "status" to "ok",
-                        "unsaved" to remaining.keys
-                    )
-                )
-            )
-        }
+        )
     }
 }
+
 
 private fun savePropertiesForContentDef(
     jsonRootNode: ObjectNode,
@@ -521,9 +548,10 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
             .map { prop ->
                 val elementJavaClass = prop.elementJavaClass
                 if (ContentDef::class.java.isAssignableFrom(prop.elementJavaClass)) {
-                    if (elementJavaClass.kotlin.companionObjectInstance is Parsable<*>) {
+//                    if (elementJavaClass.kotlin.companionObjectInstance is Parsable<*>) {
+                    if (ParsableContentDef::class.java.isAssignableFrom(prop.elementJavaClass)) {
                         require(!prop.isMultiValue) {
-                            "MultiValue parsable values are not (yet) supported. ${klass}::${prop.name}"
+                            "MultiValue parsable values are not (yet) supported. $klass::${prop.name}"
                         }
                         val propertyTypes = findPropertyTypesFor(prop, elementJavaClass)
                         ContentDefPropertyReflectionParsable(
@@ -606,9 +634,10 @@ sealed class ContentDefPropertyReflection(
     val multiValue: Boolean
 ) {
     fun getValue(content: ContentDef): Any? {
-        val property = requireNotNull(content::class.memberProperties.find { it.name == name && !it.returnType.isJavaType }) {
-            "Unable to find member property $name on $content (${content::class})"
-        }
+        val property =
+            requireNotNull(content::class.memberProperties.find { it.name == name && !it.returnType.isJavaType }) {
+                "Unable to find member property $name on $content (${content::class})"
+            }
         return property.getter.run {
             isAccessible = true
             call(content)
