@@ -88,33 +88,33 @@ class CreateTransaction(
         get() = ContentPath.parse(contentPath)
 }
 
+fun dataForCall(deps: Deps<*>, call: ApplicationCall): Pair<ContentDef, ContentDefMetadata> {
+    logger.debug { "Got request. ${call.parameters.getAll("path")}" }
+    val path =
+        call.parameters.getAll("path")?.joinToString("/")
+            ?: "/"
+
+    val contentPath = ContentPath.parse(path)
+
+    val content =
+        deps.context.contentByPath[contentPath]
+            ?: throw NotFoundException("Unable to find rootContent by path.")
+    val metadata = if (deps.content.metadata.path == contentPath) {
+        deps.content.metadata
+    } else {
+        deps.content.metadata.childrenMetadata[content]
+    }
+        ?: throw NotFoundException("Unable to find metadata.")
+
+    require(metadata.path == contentPath)
+
+    return content to metadata
+}
+
 @KtorExperimentalAPI
 fun Route.apiRouting(deps: Deps<*>) {
     val typeReflectionCache =
         mutableMapOf<KClass<out ContentDef>, ContentDefReflection<out ContentDef>>()
-
-    fun dataForCall(call: ApplicationCall): Pair<ContentDef, ContentDefMetadata> {
-        logger.debug { "Got request. ${call.parameters.getAll("path")}" }
-        val path =
-            call.parameters.getAll("path")?.joinToString("/")
-                ?: "/"
-
-        val contentPath = ContentPath.parse(path)
-
-        val content =
-            deps.context.contentByPath[contentPath]
-                ?: throw NotFoundException("Unable to find rootContent by path.")
-        val metadata = if (deps.content.metadata.path == contentPath) {
-            deps.content.metadata
-        } else {
-            deps.content.metadata.childrenMetadata[content]
-        }
-            ?: throw NotFoundException("Unable to find metadata.")
-
-        require(metadata.path == contentPath)
-
-        return content to metadata
-    }
 
     fun <T : ContentDef> reflectionForType(clazz: KClass<out T>) =
         typeReflectionCache.computeIfAbsent(clazz) { ContentDefReflection(it) }
@@ -122,46 +122,11 @@ fun Route.apiRouting(deps: Deps<*>) {
     get("/") {
         call.respondText("Hello world.")
     }
-    get("/static/{path...}") {
-        val path = call.parameters.getAll("path")?.joinToString("/")
-        val filePath = FileSystems.getDefault().getPath("./tmpDir").resolve(path)
-        if (Files.exists(filePath)) {
-            call.respondFile(filePath.toFile())
-        } else if (deps.staticDirectory != null) {
-            val fallback = FileSystems.getDefault().getPath(deps.staticDirectory).resolve(path)
-            call.respondFile(fallback.toFile())
-        } else {
-            logger.warn { "Unable to find static content $path" }
-            call.respond(HttpStatusCode.NotFound)
-        }
-    }
-    route("/api") {
-        get("/render/{path...}") {
-            val (content, metadata) = dataForCall(call)
 
-            val out = StringWriter()
-            val urlConfigTmp = deps.urlConfig.run {
-                UrlConfig(
-                    protocol, host, "api/render/"
-                )
-            }
-            val urlConfig = object : UrlConfig(urlConfigTmp.protocol, urlConfigTmp.host, urlConfigTmp.pathPrefix) {
-                override val staticFilesPrefix: String
-                    get() = "static/"
-            }
-            SinglePageStreamRenderer(
-                deps.setup.theme,
-                deps.context,
-                urlConfig,
-                AppendableOutput(out),
-                FileSystems.getDefault().getPath("./tmpDir")
-            ).renderRootContent(
-                content,
-                metadata,
-                OutputType.html
-            )
-            call.respondText(out.toString(), ContentType.Text.Html)
-        }
+    apiRoutingRender(deps)
+
+    route("/api") {
+
         get("/type/") {
             val reflected = requireNotNull(call.request.queryParameters.getAll("type"))
                 .map { className ->
@@ -177,7 +142,7 @@ fun Route.apiRouting(deps: Deps<*>) {
         }
         get("/reflect/{path...}") {
 
-            val (content, metadata) = dataForCall(call)
+            val (content, metadata) = dataForCall(deps, call)
             val contentDefClass = requireNotNull(metadata.contentDefClass)
             require(contentDefClass.isInstance(content)) {
                 "content must be an instance of $contentDefClass - actual: $content, ${content::class}"
@@ -254,7 +219,7 @@ fun Route.apiRouting(deps: Deps<*>) {
     }
 
     post("/createChild/begin/{path...}") {
-        val (content, metadata) = dataForCall(call)
+        val (content, metadata) = dataForCall(deps, call)
         val parentFsPath = requireNotNull(metadata.fsPath?.parent)
         val create = call.receive<ContentCreate>()
         val parentReflection = reflectionForType(content::class)
@@ -365,7 +330,7 @@ fun Route.apiRouting(deps: Deps<*>) {
     }
 
     patch("/update/{path...}") {
-        val (content, metadata) = dataForCall(call)
+        val (content, metadata) = dataForCall(deps, call)
         val reflection = reflectionForType(content::class)
         val modification = call.receive<ContentModification>()
         val updates = modification.updates
