@@ -75,7 +75,7 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
                         require(!prop.isMultiValue) {
                             "MultiValue parsable values are not (yet) supported. $klass::${prop.name}"
                         }
-                        val propertyTypes = findPropertyTypesFor(prop, elementJavaClass)
+                        val propertyTypes = findPropertyTypesFor(elementJavaClass)
                         ContentDefPropertyReflectionParsable(
                             prop.name,
                             prop.returnType.isMarkedNullable,
@@ -94,7 +94,6 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
                             }?.toMap() ?: emptyMap()) +
                                 // TODO i don't think this is necessary actually?
                                 findPropertyTypesFor(
-                                    prop,
                                     elementJavaClass
                                 ).mapValues { it.value.java.name },
                             elementJavaClass.name
@@ -145,7 +144,7 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
 //            .sortedBy { it.name }
     }
 
-    private fun findPropertyTypesFor(property: KProperty<*>, clazz: Class<*>) =
+    private fun findPropertyTypesFor(clazz: Class<*>) =
         contentLoader.findPropertyTypes().filter { clazz.isAssignableFrom(it.value.java) }
 }
 
