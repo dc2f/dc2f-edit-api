@@ -4,8 +4,8 @@ package com.dc2f.api.edit
 
 import app.anlage.site.contentdef.WebsiteFolderContent
 import com.dc2f.*
-import com.dc2f.api.edit.dto.ApiDto
-import com.dc2f.util.*
+import com.dc2f.loader.*
+import com.dc2f.util.ApiDto
 import com.fasterxml.jackson.annotation.*
 import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.databind.*
@@ -23,11 +23,9 @@ import io.ktor.routing.*
 import io.ktor.util.KtorExperimentalAPI
 import mu.KotlinLogging
 import java.io.File
-import java.lang.reflect.Modifier
 import java.nio.file.*
 import kotlin.reflect.*
 import kotlin.reflect.full.*
-import kotlin.reflect.jvm.*
 
 private val logger = KotlinLogging.logger {}
 
