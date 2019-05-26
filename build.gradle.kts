@@ -31,6 +31,7 @@ dependencies {
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
     implementation("io.ktor:ktor-jackson:$ktorVersion")
+    implementation("io.ktor:ktor-websockets:$ktorVersion")
 
     // logging
     compile("io.github.microutils:kotlin-logging:1.4.9")

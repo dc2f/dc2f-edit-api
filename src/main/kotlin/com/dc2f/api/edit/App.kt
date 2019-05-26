@@ -3,12 +3,8 @@
  */
 package com.dc2f.api.edit
 
-import app.anlage.site.FinalyzerTheme
-import app.anlage.site.contentdef.FinalyzerWebsite
 import com.dc2f.Website
 import com.dc2f.api.edit.dto.ErrorResponse
-import com.dc2f.render.*
-import com.dc2f.util.Dc2fSetup
 import com.fasterxml.jackson.annotation.JsonFormat
 import com.fasterxml.jackson.databind.*
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
@@ -23,14 +19,15 @@ import io.ktor.routing.routing
 import io.ktor.server.engine.*
 import io.ktor.server.netty.Netty
 import io.ktor.util.KtorExperimentalAPI
+import io.ktor.websocket.WebSockets
 import org.slf4j.bridge.SLF4JBridgeHandler
-import java.time.LocalDate
+import java.time.*
 import java.util.concurrent.TimeUnit
-import kotlin.reflect.KClass
 
 private val logger = mu.KotlinLogging.logger {}
 
 
+@Suppress("unused")
 @UseExperimental(KtorExperimentalAPI::class)
 fun Application.dc2fEditorApi() {
 
@@ -65,6 +62,9 @@ fun Application.installFeatures() {
         filter { false }
     }
     install(CustomCallLogFeature)
+    install(WebSockets) {
+        pingPeriod = Duration.ofMinutes(1)
+    }
     install(ContentNegotiation) {
         // sendBeacon() in chrome only allows sending text/plain or form data, so just treat it as json.
         val j = JacksonConverter(jacksonObjectMapper().also { it.configureObjectMapper() })

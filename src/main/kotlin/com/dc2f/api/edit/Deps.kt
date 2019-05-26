@@ -22,9 +22,9 @@ interface MessageTransformer {
     fun transformWrite(content: String): String
 }
 
-class SimpleMessageTransformer(val secret: String) : MessageTransformer {
+class SimpleMessageTransformer(secret: String) : MessageTransformer {
 
-    val transformer = SessionTransportTransformerMessageAuthentication(secret.toByteArray())
+    private val transformer = SessionTransportTransformerMessageAuthentication(secret.toByteArray())
 
     override fun transformRead(content: String): String? {
         return transformer.transformRead(Base64.getDecoder().decode(content).toString(Charsets.UTF_8))
@@ -44,18 +44,18 @@ private fun <T : Website<*>> loadSetup(className: String): Dc2fSetup<T> {
 
 
 @Suppress("EXPERIMENTAL_API_USAGE")
-class Deps<T: Website<*>>(private val dc2fEditApiConfig: ApplicationConfig) {
+class Deps<T: Website<*>>(dc2fEditApiConfig: ApplicationConfig) {
 //    init {
 //        loadContent()
 //    }
     val setup = loadSetup<T>(dc2fEditApiConfig.property(CONFIG_SETUP_CLASS).getString())
 
-    val content : LoadedContent<T> get() = rootContent ?: throw InvalidStateException("Not yet ready.")
+    val content : LoadedContent<T> get() = rootContent
     val context : LoaderContext get() = loaderContext ?: throw InvalidStateException("Not yet ready.")
     val messageTransformer : MessageTransformer = SimpleMessageTransformer(dc2fEditApiConfig.property(CONFIG_SECRET).getString())
     val contentRootPath = requireNotNull(FileSystems.getDefault().getPath(dc2fEditApiConfig.property(CONTENT_DIRECTORY).getString()))
-    var loaderContext: LoaderContext? = null
-    var rootContent: LoadedContent<T> = loadContent()
+    private var loaderContext: LoaderContext? = null
+    private var rootContent: LoadedContent<T> = loadContent()
     val urlConfig: UrlConfig get() = setup.urlConfig(rootContent.content)
 
     val staticDirectory: String? = dc2fEditApiConfig.propertyOrNull(CONFIG_STATIC_DIRECTORY)?.getString()
@@ -64,14 +64,16 @@ class Deps<T: Website<*>>(private val dc2fEditApiConfig: ApplicationConfig) {
         val loader = ContentLoader(setup.rootContent)
         return loader.load(contentRootPath) { loadedWebsite, context ->
             @Suppress("UNCHECKED_CAST")
-            this.rootContent = loadedWebsite as LoadedContent<T>
+            this.rootContent = loadedWebsite
             this.loaderContext = context
             logger.debug { "Loaded website $loadedWebsite" }
             loadedWebsite
         }
     }
 
-    fun reload() {
-        loadContent()
+    fun reload(content: ContentDef) {
+//        loaderContext?.close()
+//        loadContent()
+        context.reload(content)
     }
 }

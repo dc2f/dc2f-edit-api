@@ -1,28 +1,28 @@
+@file:Suppress("BlockingMethodInNonBlockingContext")
+
 package com.dc2f.api.edit
 
 import app.anlage.site.contentdef.WebsiteFolderContent
 import com.dc2f.*
 import com.dc2f.api.edit.dto.ApiDto
-import com.dc2f.render.*
 import com.dc2f.util.*
-import com.fasterxml.jackson.annotation.JsonIgnore
+import com.fasterxml.jackson.annotation.*
 import com.fasterxml.jackson.core.JsonGenerator
 import com.fasterxml.jackson.databind.*
 import com.fasterxml.jackson.databind.module.SimpleModule
 import com.fasterxml.jackson.databind.node.*
 import com.fasterxml.jackson.databind.ser.BeanSerializerModifier
-import com.fasterxml.jackson.dataformat.yaml.*
+import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator
 import com.fasterxml.jackson.module.kotlin.*
 import io.ktor.application.*
 import io.ktor.features.NotFoundException
-import io.ktor.http.*
 import io.ktor.http.content.*
 import io.ktor.request.*
 import io.ktor.response.*
 import io.ktor.routing.*
 import io.ktor.util.KtorExperimentalAPI
 import mu.KotlinLogging
-import java.io.*
+import java.io.File
 import java.lang.reflect.Modifier
 import java.nio.file.*
 import kotlin.reflect.*
@@ -48,8 +48,6 @@ private val yamlObjectMapper =
             .configure(YAMLGenerator.Feature.INDENT_ARRAYS, true)
             .configure(YAMLGenerator.Feature.WRITE_DOC_START_MARKER, false)
     )
-
-class UnknownClass
 
 /// either the class of the return value, or the class of elements in the collection, if multivalue (ie. a collection)
 private val <R> KProperty<R>.elementJavaClass: Class<*>
@@ -88,6 +86,7 @@ class CreateTransaction(
         get() = ContentPath.parse(contentPath)
 }
 
+@KtorExperimentalAPI
 fun dataForCall(deps: Deps<*>, call: ApplicationCall): Pair<ContentDef, ContentDefMetadata> {
     logger.debug { "Got request. ${call.parameters.getAll("path")}" }
     val path =
@@ -102,7 +101,8 @@ fun dataForCall(deps: Deps<*>, call: ApplicationCall): Pair<ContentDef, ContentD
     val metadata = if (deps.content.metadata.path == contentPath) {
         deps.content.metadata
     } else {
-        deps.content.metadata.childrenMetadata[content]
+        deps.context.metadata[content]
+//        deps.content.metadata.childrenMetadata[content]
     }
         ?: throw NotFoundException("Unable to find metadata.")
 
@@ -216,148 +216,151 @@ fun Route.apiRouting(deps: Deps<*>) {
 //            call.respond(om.writeValueAsString(InspectDto(rootContent)))
             call.respond(om.writeValueAsString(root))
         }
-    }
 
-    post("/createChild/begin/{path...}") {
-        val (content, metadata) = dataForCall(deps, call)
-        val parentFsPath = requireNotNull(metadata.fsPath?.parent)
-        val create = call.receive<ContentCreate>()
-        val parentReflection = reflectionForType(content::class)
-        val prop = requireNotNull(parentReflection.property[create.property]) {
-            "Unknown property ${create.property} for type ${content::class}"
-        }
-        require(prop.multiValue) { "Currently we only support multi value properties." }
-        require(prop is ContentDefPropertyReflectionNested)
-        val type =
-            requireNotNull(prop.allowedTypes[create.typeIdentifier]) { "Invalid type identifier ${create.typeIdentifier} for ${prop.name} (types: ${prop.allowedTypes}" }
-        @Suppress("UNCHECKED_CAST")
-        val reflection = reflectionForType(Class.forName(type).kotlin as KClass<out ContentDef>)
+        post("/createChild/begin/{path...}") {
+            val (content, metadata) = dataForCall(deps, call)
+            val parentFsPath = requireNotNull(metadata.fsPath?.parent)
+            val create = call.receive<ContentCreate>()
+            val parentReflection = reflectionForType(content::class)
+            val prop = requireNotNull(parentReflection.property[create.property]) {
+                "Unknown property ${create.property} for type ${content::class}"
+            }
+            require(prop.multiValue) { "Currently we only support multi value properties." }
+            require(prop is ContentDefPropertyReflectionNested)
+            val type =
+                requireNotNull(prop.allowedTypes[create.typeIdentifier]) { "Invalid type identifier ${create.typeIdentifier} for ${prop.name} (types: ${prop.allowedTypes}" }
+            @Suppress("UNCHECKED_CAST")
+            val reflection = reflectionForType(Class.forName(type).kotlin as KClass<out ContentDef>)
 
-        val siblings = prop.getValue(content)
-        val prefix = if (siblings != null && siblings is Collection<*>) {
-            val last = siblings.last() as ContentDef
-            val lastMetadata = requireNotNull(metadata.childrenMetadata[last])
+            val siblings = prop.getValue(content)
+            val prefix = if (siblings != null && siblings is Collection<*>) {
+                val last = siblings.last() as ContentDef
+                val lastMetadata = requireNotNull(metadata.childrenMetadata[last])
 //                requireNotNull(lastMetadata.fsPath).fileName.toString().split('.')
 //                    .first()
 //                    .toIntOrNull()
 //                    ?.let { String.format("%03d.", it + 1) }
-            lastMetadata.comment?.toIntOrNull()?.let { String.format("%03d.", it + 1) }
-        } else {
-            "000."
-        }
-        val fileName = arrayOf(prefix, create.slug, ".", create.typeIdentifier).filterNotNull()
-            .joinToString("")
-        val directory = parentFsPath.resolve(fileName)
-        val relativeDirectory = deps.contentRootPath.relativize(directory)
+                lastMetadata.comment?.toIntOrNull()?.let { String.format("%03d.", it + 1) }
+            } else {
+                "000."
+            }
+            val fileName = arrayOf(prefix, create.slug, ".", create.typeIdentifier).filterNotNull()
+                .joinToString("")
+            val directory = parentFsPath.resolve(fileName)
+            val relativeDirectory = deps.contentRootPath.relativize(directory)
 
-        Files.createDirectory(directory)
+            Files.createDirectory(directory)
 //            Files.write(
 //                directory.resolve(INDEX_YAML_NAME),
 //                yamlObjectMapper.writeValueAsBytes(create.content)
 //            )
 
-        savePropertiesForContentDef(
-            yamlObjectMapper.createObjectNode(),
-            directory,
-            create.content,
-            reflection,
-            directory.resolve(INDEX_YAML_NAME)
-        )
+            savePropertiesForContentDef(
+                yamlObjectMapper.createObjectNode(),
+                directory,
+                create.content,
+                reflection,
+                directory.resolve(INDEX_YAML_NAME)
+            )
 
-        call.respond(
-            om.writeValueAsString(
-                mapOf(
-                    "status" to "ok",
-                    "transaction" to deps.messageTransformer.transformWrite(
-                        om.writeValueAsString(
-                            CreateTransaction(
-                                relativeDirectory.toString(),
-                                metadata.path.child(create.slug).toString()
+            call.respond(
+                om.writeValueAsString(
+                    mapOf(
+                        "status" to "ok",
+                        "transaction" to deps.messageTransformer.transformWrite(
+                            om.writeValueAsString(
+                                CreateTransaction(
+                                    relativeDirectory.toString(),
+                                    metadata.path.child(create.slug).toString()
+                                )
                             )
                         )
                     )
                 )
             )
-        )
-    }
-    post("/createChild/upload/{path...}") {
-        val transactionValue = requireNotNull(call.request.header("x-transaction"))
-        val transaction = om.readValue<CreateTransaction>(
-            requireNotNull(
-                deps.messageTransformer.transformRead(transactionValue)
+        }
+        post("/createChild/upload/{path...}") {
+            val transactionValue = requireNotNull(call.request.header("x-transaction"))
+            val transaction = om.readValue<CreateTransaction>(
+                requireNotNull(
+                    deps.messageTransformer.transformRead(transactionValue)
+                )
             )
-        )
-        val multipart = call.receiveMultipart()
+            val multipart = call.receiveMultipart()
 
-        val directory = deps.contentRootPath.resolve(transaction.path)
+            val directory = deps.contentRootPath.resolve(transaction.path)
 
-        multipart.forEachPart { part ->
-            when (part) {
-                is PartData.FileItem -> {
-                    val bareName = File(part.originalFileName).name
-                    val uploadFile = File(directory.toFile(), bareName)
-                    part.streamProvider().use { input ->
-                        uploadFile.outputStream().buffered().use { output ->
-                            input.copyTo(output)
+            multipart.forEachPart { part ->
+                when (part) {
+                    is PartData.FileItem -> {
+                        val bareName = File(part.originalFileName).name
+                        val uploadFile = File(directory.toFile(), bareName)
+                        part.streamProvider().use { input ->
+                            uploadFile.outputStream().buffered().use { output ->
+                                input.copyTo(output)
+                            }
                         }
                     }
+                    is PartData.FormItem -> {
+                        logger.debug { "Got a form item? ${part.value}" }
+                    }
+                    else -> throw UnsupportedOperationException("We currently only support file items, got a $part")
                 }
-                is PartData.FormItem -> {
-                    logger.debug { "Got a form item? ${part.value}" }
-                }
-                else -> throw UnsupportedOperationException("We currently only support file items, got a $part")
             }
+            call.respond(om.writeValueAsString(mapOf("status" to "ok")))
         }
-        call.respond(om.writeValueAsString(mapOf("status" to "ok")))
-    }
 
-    post("/createChild/commit") {
-        val transactionValue = requireNotNull(call.request.header("x-transaction"))
-        val transaction = om.readValue<CreateTransaction>(
-            requireNotNull(
-                deps.messageTransformer.transformRead(transactionValue)
-            )
-        )
-        deps.reload()
-        call.respond(
-            om.writeValueAsString(
-                mapOf(
-                    "status" to "ok",
-                    "path" to transaction.contentPath.toString()
+        post("/createChild/commit") {
+            val transactionValue = requireNotNull(call.request.header("x-transaction"))
+            val transaction = om.readValue<CreateTransaction>(
+                requireNotNull(
+                    deps.messageTransformer.transformRead(transactionValue)
                 )
             )
-        )
-    }
-
-    patch("/update/{path...}") {
-        val (content, metadata) = dataForCall(deps, call)
-        val reflection = reflectionForType(content::class)
-        val modification = call.receive<ContentModification>()
-        val updates = modification.updates
-        val fsPath = requireNotNull(metadata.fsPath)
-        val fsPathDirectory = fsPath.parent
-        val jsonRootNode = yamlObjectMapper.readTree(Files.readAllBytes(fsPath)) as ObjectNode
-
-        val remaining = savePropertiesForContentDef(
-            jsonRootNode,
-            fsPathDirectory,
-            updates,
-            reflection,
-            fsPath
-        )
-
-        logger.debug { "Properties not saved $remaining" }
-
-        deps.reload()
-
-        call.respond(
-            om.writeValueAsString(
-                mapOf(
-                    "status" to "ok",
-                    "unsaved" to remaining.keys
+            val parent = requireNotNull(deps.context.contentByPath[transaction.contentPathValue])
+            deps.reload(parent)
+            call.respond(
+                om.writeValueAsString(
+                    mapOf(
+                        "status" to "ok",
+                        "path" to transaction.contentPath
+                    )
                 )
             )
-        )
+        }
+
+        patch("/update/{path...}") {
+            val (content, metadata) = dataForCall(deps, call)
+            val reflection = reflectionForType(content::class)
+            val modification = call.receive<ContentModification>()
+            val updates = modification.updates
+            val fsPath = requireNotNull(metadata.fsPath)
+            val fsPathDirectory = fsPath.parent
+            val jsonRootNode = yamlObjectMapper.readTree(Files.readAllBytes(fsPath)) as ObjectNode
+
+            val remaining = savePropertiesForContentDef(
+                jsonRootNode,
+                fsPathDirectory,
+                updates,
+                reflection,
+                fsPath
+            )
+
+            logger.debug { "Properties not saved $remaining" }
+
+            deps.reload(content)
+
+            notifyMembers()
+
+            call.respond(
+                om.writeValueAsString(
+                    mapOf(
+                        "status" to "ok",
+                        "unsaved" to remaining.keys
+                    )
+                )
+            )
+        }
     }
 }
 
@@ -372,7 +375,6 @@ private fun savePropertiesForContentDef(
     var jsonRootNodeChanged = false
 
     fun saveProperty(prop: ContentDefPropertyReflection, value: JsonNode): Boolean {
-        val key = prop.name
         return when (prop) {
             is ContentDefPropertyReflectionParsable -> {
                 if (jsonRootNode.has(prop.name)) {
@@ -462,8 +464,10 @@ data class ContentModification(
 @ApiDto
 class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
 
+    @Suppress("unused")
     val type get() = klass.qualifiedName
 
+    @Suppress("unused")
     val typeIdentifier: String? by lazy {
         klass.findAnnotation<Nestable>()?.identifier
     }
@@ -471,6 +475,7 @@ class ContentDefReflection<T : ContentDef>(@JsonIgnore val klass: KClass<T>) {
     @JsonIgnore
     val contentLoader = ContentLoader(klass)
 
+    @Suppress("unused")
     val defaultValues by lazy {
         if (!klass.isSubclassOf(ContentDef::class)) {
             logger.debug("Discovered a class which is not a subclass of ContentDef. not reflecting default values. $klass")
@@ -609,6 +614,7 @@ sealed class ContentDefPropertyReflection(
         }
     }
 
+    @Suppress("unused")
     val kind
         get() = when (this) {
             is ContentDefPropertyReflectionParsable -> "Parsable"
@@ -623,12 +629,14 @@ sealed class ContentDefPropertyReflection(
 
 class ContentDefPropertyReflectionEnum(
     name: String, optional: Boolean, multiValue: Boolean,
+    @Suppress("unused")
     val enumValues: List<String>
 ) : ContentDefPropertyReflection(name, optional, multiValue)
 
 
 class ContentDefPropertyReflectionPrimitive(
     name: String, optional: Boolean, multiValue: Boolean,
+    @Suppress("unused")
     val type: PrimitiveType
 ) : ContentDefPropertyReflection(name, optional, multiValue)
 
@@ -657,11 +665,13 @@ enum class PrimitiveType(vararg val clazz: KClass<*>) {
 
 class ContentDefPropertyReflectionParsable(
     name: String, optional: Boolean, multiValue: Boolean,
+    @Suppress("unused")
     val parsableHint: String, @JsonIgnore val parsableTypes: Map<String, KClass<out Any>>
 ) : ContentDefPropertyReflection(name, optional, multiValue)
 
 class ContentDefPropertyReflectionMap(
     name: String, optional: Boolean, multiValue: Boolean,
+    @Suppress("unused")
     val mapValueType: String
 ) : ContentDefPropertyReflection(name, optional, multiValue)
 
@@ -672,6 +682,7 @@ class ContentDefPropertyReflectionNested(
 
 class ContentDefPropertyReflectionFileAsset(
     name: String, optional: Boolean, multiValue: Boolean,
+    @Suppress("unused")
     val fileType: Type
 ) : ContentDefPropertyReflection(name, optional, multiValue) {
     enum class Type {
