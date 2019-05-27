@@ -159,7 +159,7 @@ fun Route.apiRouting(deps: Deps<*>) {
                                     if (prop is ContentDefPropertyReflectionParsable) {
                                         put(
                                             "rawContent",
-                                            (contentDefChild.loadedContent.content as ParsableContentDef).rawContent()
+                                            (contentDefChild.loadedContent.content as ParsableObjectDef).rawContent()
                                         )
                                     }
                                 }
