@@ -30,6 +30,7 @@ repositories {
 dependencies {
     // Use the Kotlin JDK 8 standard library.
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+    implementation(kotlin("reflect"))
 //
 //    // Ktor
 //    implementation("io.ktor:ktor-server-core:$ktorVersion")
@@ -49,6 +50,7 @@ dependencies {
     // yaml deserialize
     compile("com.fasterxml.jackson.core:jackson-annotations:$jacksonVersion")
     compile("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:$jacksonVersion")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:$jacksonVersion")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:$jacksonVersion")
     constraints {
         compile("org.yaml:snakeyaml:1.24")
@@ -71,16 +73,6 @@ dependencies {
 //
 //    }
 //}
-
-
-val compileKotlin by tasks.getting(KotlinCompile::class) {
-    kotlinOptions {
-        freeCompilerArgs = listOf(
-            "-Xuse-experimental=kotlin.Experimental",
-            "-Xuse-experimental=io.ktor.locations.KtorExperimentalLocationsAPI"
-        )
-    }
-}
 
 
 application {

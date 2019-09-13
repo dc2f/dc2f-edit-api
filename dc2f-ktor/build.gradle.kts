@@ -17,6 +17,20 @@ repositories {
     maven("https://oss.sonatype.org/content/groups/public/")
 }
 
+tasks.withType<KotlinCompile> {
+    kotlinOptions.jvmTarget = "1.8"
+    kotlinOptions.freeCompilerArgs = listOf("-Xjvm-default=enable")
+}
+
+val compileKotlin by tasks.getting(KotlinCompile::class) {
+    kotlinOptions {
+        freeCompilerArgs = listOf(
+            "-Xuse-experimental=kotlin.Experimental",
+            "-Xuse-experimental=io.ktor.locations.KtorExperimentalLocationsAPI"
+        )
+    }
+}
+
 dependencies {
     implementation(project(":"))
     // Use the Kotlin JDK 8 standard library.

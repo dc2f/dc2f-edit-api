@@ -90,17 +90,6 @@ fun Application.installFeatures() {
     }
 }
 
-internal fun ObjectMapper.configureObjectMapper() {
-    enable(SerializationFeature.INDENT_OUTPUT)
-    registerModule(JavaTimeModule().also {
-    }/*.also { it.addSerializer(LocalDate::class.java, LocalDateSerializer()) }*/)
-//            configOverride(LocalDateTime::class.java).format = JsonFormat.Value.forShape(JsonFormat.Shape.STRING)
-    // Write timestamps ans Milliseconds, instead of seconds with nano decimals.
-    configure(SerializationFeature.WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS, false)
-    configure(DeserializationFeature.READ_DATE_TIMESTAMPS_AS_NANOSECONDS, false)
-    configOverride(LocalDate::class.java).format = JsonFormat.Value.forPattern("yyyy-MM-dd")
-}
-
 class EditApi<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WEBSITE>) {
     fun serve() {
 //        val applicationEnvironment = commandLineEnvironment(emptyArray())
