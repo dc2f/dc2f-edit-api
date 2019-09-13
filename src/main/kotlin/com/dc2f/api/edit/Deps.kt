@@ -2,11 +2,12 @@ package com.dc2f.api.edit
 
 import com.dc2f.*
 import com.dc2f.render.UrlConfig
-import com.dc2f.util.Dc2fSetup
+import com.dc2f.util.*
 import io.ktor.config.ApplicationConfig
 import io.ktor.sessions.SessionTransportTransformerMessageAuthentication
 import mu.KotlinLogging
 import sun.plugin.dom.exception.InvalidStateException
+import java.io.Closeable
 import java.nio.file.*
 import java.util.*
 
@@ -48,7 +49,7 @@ class EditApiConfig<T : Website<*>>(
     val secret: String,
     val contentRoot: Path,
     val staticRoot: String?
-) {
+): Closeable {
     companion object {
         fun <T : Website<*>> parse(dc2fEditApiConfig: ApplicationConfig): EditApiConfig<T> {
             return EditApiConfig(
@@ -63,11 +64,17 @@ class EditApiConfig<T : Website<*>>(
     val deps by lazy {
         Deps(this)
     }
+
+    override fun close() {
+        if (this::deps.isLazyInitialized) {
+            deps.close()
+        }
+    }
 }
 
 
 @Suppress("EXPERIMENTAL_API_USAGE")
-class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>) {
+class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>): Closeable {
     //    init {
 //        loadContent()
 //    }
@@ -87,16 +94,25 @@ class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>) {
         editApiConfig.staticRoot
 
     private val onRefreshListeners = mutableListOf<suspend () -> Unit>()
+    val handler by lazy {
+        ApiHandler(this)
+    }
 
     private fun loadContent(): LoadedContent<T> {
         val loader = ContentLoader(setup.rootContent)
-        return loader.load(contentRootPath) { loadedWebsite, context ->
-            @Suppress("UNCHECKED_CAST")
-            this.rootContent = loadedWebsite
-            this.loaderContext = context
-            logger.debug { "Loaded website ${loadedWebsite.content.name}" }
-            loadedWebsite
-        }
+        val (loadedWebsite, context) = loader.loadWithoutClose(contentRootPath)
+
+        @Suppress("UNCHECKED_CAST")
+        this.rootContent = loadedWebsite
+        this.loaderContext = context
+        logger.debug { "Loaded website ${loadedWebsite.content.name}" }
+        return loadedWebsite
+    }
+
+    override fun close() {
+        logger.info("closing.")
+        loaderContext?.close()
+        onRefreshListeners.clear()
     }
 
     fun registerOnRefreshListener(listener: suspend () -> Unit) {

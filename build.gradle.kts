@@ -15,9 +15,15 @@ val jacksonVersion = "2.9.9"
 plugins {
     // Apply the Kotlin JVM plugin to add support for Kotlin on the JVM.
     id("org.jetbrains.kotlin.jvm").version("1.3.20")
+    id("io.ratpack.ratpack-java").version("1.7.3")
 
     // Apply the application plugin to add support for building a CLI application.
     application
+}
+
+tasks.withType<KotlinCompile> {
+    kotlinOptions.jvmTarget = "1.8"
+    kotlinOptions.freeCompilerArgs = listOf("-Xjvm-default=enable")
 }
 
 repositories {

@@ -64,22 +64,7 @@ fun dataForCall(deps: Deps<*>, call: ApplicationCall): Pair<ContentDef, ContentD
         call.parameters.getAll("path")?.joinToString("/")
             ?: "/"
 
-    val contentPath = ContentPath.parse(path)
-
-    val content =
-        deps.context.contentByPath[contentPath]
-            ?: throw NotFoundException("Unable to find rootContent by path.")
-    val metadata = if (deps.content.metadata.path == contentPath) {
-        deps.content.metadata
-    } else {
-        deps.context.metadata[content]
-//        deps.content.metadata.childrenMetadata[content]
-    }
-        ?: throw NotFoundException("Unable to find metadata.")
-
-    require(metadata.path == contentPath)
-
-    return content to metadata
+    return deps.handler.dataForUrlPath(path)
 }
 
 @KtorExperimentalAPI

@@ -114,7 +114,19 @@ class EditApi<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WEBSITE>) {
                 engine.stop(1, 5, TimeUnit.SECONDS)
             }
         })
-        engine.start(wait = true)
+
+        engine.start(wait = false)
+        logger.info { "Started.."}
+        while (true) {
+            try {
+                Thread.sleep(5000)
+                logger.trace { "Still running ;-)"}
+            } catch (e: InterruptedException) {
+                logger.info { "We have been interrupted." }
+                engine.stop(5, 8, TimeUnit.SECONDS)
+                break
+            }
+        }
 //        Thread.currentThread().join()
         logger.info { "Existing ..." }
 //        while (true) {

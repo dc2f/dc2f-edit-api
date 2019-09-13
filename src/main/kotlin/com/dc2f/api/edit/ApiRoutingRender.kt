@@ -58,53 +58,9 @@ fun Route.apiRoutingRender(deps: Deps<*>) {
 
         get("/render/{path...}") {
             val (content, metadata) = dataForCall(deps, call)
-
-            val out = StringWriter()
-            val urlConfigTmp = deps.urlConfig.run {
-                UrlConfig(
-                    protocol, host, "api/render/"
-                )
-            }
-            val urlConfig = object :
-                UrlConfig(urlConfigTmp.protocol, urlConfigTmp.host, urlConfigTmp.pathPrefix) {
-                override val staticFilesPrefix: String
-                    get() = "static/"
-            }
-            SinglePageStreamRenderer(
-                deps.setup.theme,
-                deps.context,
-                urlConfig,
-                AppendableOutput(out),
-                FileSystems.getDefault().getPath("./tmpDir")
-            ).renderRootContent(
-                content,
-                metadata,
-                OutputType.html
-            )
-            val response = out.toString().replace("</head>", "<script>$jsInject</script></head>")
+            val response = deps.handler.renderContentToString(content, metadata)
             call.respondText(response, ContentType.Text.Html)
         }
     }
 }
 
-
-// language="ECMAScript 6"
-private val jsInject = """
-const host = window.location.host;
-const socket = new WebSocket('ws://'+host+'/api/ws');
-
-// Connection opened
-socket.addEventListener('open', function (event) {
-    socket.send('Hello Server!');
-    console.log('we are connected.', event);
-});
-
-// Listen for messages
-socket.addEventListener('message', function (event) {
-    console.log('Message from server ', event.data);
-    if (event.data === 'reload') {
-        window.location.reload();
-    }
-});
-
-""".trimIndent()
