@@ -1,6 +1,3 @@
 [submodule "deps/dc2f.kt"]
 	path = deps/dc2f.kt
 	url = https://github.com/dc2f/dc2f.kt.git
-[submodule "deps/finalyzer-dc2f-site"]
-	path = deps/finalyzer-dc2f-site
-	url = https://github.com/hpoul/finalyzer-dc2f-site.git
