@@ -2,7 +2,6 @@
 
 package com.dc2f.api.edit
 
-import app.anlage.site.contentdef.WebsiteFolderContent
 import com.dc2f.*
 import com.dc2f.loader.*
 import com.dc2f.util.ApiDto
@@ -96,6 +95,10 @@ fun Route.apiRouting(deps: Deps<*>) {
     }
 
     apiRoutingRender(deps)
+
+    deps.registerOnRefreshListener {
+        notifyMembers()
+    }
 
     route("/api") {
 
@@ -322,9 +325,7 @@ fun Route.apiRouting(deps: Deps<*>) {
 
             deps.reload(content)
 
-            notifyMembers()
-
-            call.respond(
+           call.respond(
                 om.writeValueAsString(
                     mapOf(
                         "status" to "ok",
@@ -462,7 +463,7 @@ class ContentDefSerializerModifier : BeanSerializerModifier() {
     ): JsonSerializer<*> {
         if (
             ContentDef::class.java.isAssignableFrom(beanDesc.beanClass) &&
-            !WebsiteFolderContent::class.java.isAssignableFrom(beanDesc.beanClass)
+            !ContentDefNested::class.java.isAssignableFrom(beanDesc.beanClass)
         ) {
             return ContentDefSerializer()
         }

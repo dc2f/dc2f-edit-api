@@ -22,6 +22,7 @@ import io.ktor.util.KtorExperimentalAPI
 import io.ktor.websocket.WebSockets
 import org.slf4j.bridge.SLF4JBridgeHandler
 import java.time.*
+import java.time.temporal.ChronoUnit
 import java.util.concurrent.TimeUnit
 
 private val logger = mu.KotlinLogging.logger {}
@@ -32,7 +33,12 @@ private val logger = mu.KotlinLogging.logger {}
 fun Application.dc2fEditorApi() {
 
     val dc2fEditApiConfig = environment.config.config("dc2f")
-    val deps = Deps<Website<*>>(dc2fEditApiConfig)
+    val deps = Deps<Website<*>>(EditApiConfig.parse(dc2fEditApiConfig))
+    dc2fEditorApi(deps)
+}
+
+@UseExperimental(KtorExperimentalAPI::class)
+fun Application.dc2fEditorApi(deps: Deps<in Website<*>>) {
 
     environment.monitor.subscribe(ApplicationStopping) {
         log.warn("Application is stopping. Closing connections.")
@@ -84,6 +90,46 @@ internal fun ObjectMapper.configureObjectMapper() {
     configOverride(LocalDate::class.java).format = JsonFormat.Value.forPattern("yyyy-MM-dd")
 }
 
+class EditApi<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WEBSITE>) {
+    fun serve() {
+//        val applicationEnvironment = commandLineEnvironment(emptyArray())
+        val deps = editApiConfig.deps
+
+        val applicationEnvironment = applicationEngineEnvironment {
+            connector {
+                this.host = "127.0.0.1"
+                this.port = 8000
+            }
+            module {
+                @Suppress("UNCHECKED_CAST")
+                dc2fEditorApi(deps as Deps<Website<*>>)
+            }
+        }
+        val engine = embeddedServer(Netty, applicationEnvironment) {
+
+        }
+        Runtime.getRuntime().addShutdownHook(object : Thread() {
+            override fun run() {
+                logger.info { "Initiating shutdown..." }
+                engine.stop(1, 5, TimeUnit.SECONDS)
+            }
+        })
+        engine.start(wait = true)
+//        Thread.currentThread().join()
+        logger.info { "Existing ..." }
+//        while (true) {
+//            val line = readLine()
+//            if (arrayOf("stop", "quit").contains(line)) {
+//                logger.info { "Stopping" }
+//                engine.stop(5, 5, TimeUnit.SECONDS)
+//                logger.info { "Called stop." }
+//                break
+//            } else {
+//                logger.info { "Invalid input: $line" }
+//            }
+//        }
+    }
+}
 
 fun main(args: Array<String>) {
     SLF4JBridgeHandler.removeHandlersForRootLogger()
@@ -91,7 +137,6 @@ fun main(args: Array<String>) {
 
     val applicationEnvironment = commandLineEnvironment(args)
     val engine = embeddedServer(Netty, applicationEnvironment) {
-
     }
     engine.start()
     Runtime.getRuntime().addShutdownHook(object : Thread() {

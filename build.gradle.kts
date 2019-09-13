@@ -6,6 +6,9 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
  * This generated file contains a sample Kotlin application project to get you started.
  */
 
+group = "com.dc2f"
+version = "0.0.1-SNAPSHOT"
+
 val ktorVersion = "1.2.0"
 val jacksonVersion = "2.9.9"
 
@@ -18,9 +21,11 @@ plugins {
 }
 
 repositories {
+    mavenCentral()
     // Use jcenter for resolving your dependencies.
     // You can declare any Maven/Ivy/file repository here.
     jcenter()
+    maven("https://oss.sonatype.org/content/groups/public/")
 }
 
 dependencies {
@@ -39,8 +44,8 @@ dependencies {
     compile("ch.qos.logback:logback-classic:1.2.1")
 
     // dc2f
-    implementation("com.dc2f:dc2f:0.0.1-SNAPSHOT")
-    implementation("app.anlage.site:finalyzer-dc2f-site:0.0.1-SNAPSHOT")
+    implementation("com.dc2f:dc2f:0.1.3-SNAPSHOT")
+//    implementation("app.anlage.site:finalyzer-dc2f-site:0.0.1-SNAPSHOT")
 
     // yaml deserialize
     compile("com.fasterxml.jackson.core:jackson-annotations:$jacksonVersion")

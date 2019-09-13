@@ -90,7 +90,8 @@ fun Route.apiRoutingRender(deps: Deps<*>) {
 
 // language="ECMAScript 6"
 private val jsInject = """
-const socket = new WebSocket('ws://localhost:8012/api/ws');
+const host = window.location.host;
+const socket = new WebSocket('ws://'+host+'/api/ws');
 
 // Connection opened
 socket.addEventListener('open', function (event) {

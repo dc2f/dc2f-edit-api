@@ -7,7 +7,7 @@ import io.ktor.config.ApplicationConfig
 import io.ktor.sessions.SessionTransportTransformerMessageAuthentication
 import mu.KotlinLogging
 import sun.plugin.dom.exception.InvalidStateException
-import java.nio.file.FileSystems
+import java.nio.file.*
 import java.util.*
 
 private val logger = KotlinLogging.logger {}
@@ -42,23 +42,51 @@ private fun <T : Website<*>> loadSetup(className: String): Dc2fSetup<T> {
     return setup as Dc2fSetup<T>
 }
 
+@Suppress("EXPERIMENTAL_API_USAGE")
+class EditApiConfig<T : Website<*>>(
+    val setup: Dc2fSetup<T>,
+    val secret: String,
+    val contentRoot: Path,
+    val staticRoot: String?
+) {
+    companion object {
+        fun <T : Website<*>> parse(dc2fEditApiConfig: ApplicationConfig): EditApiConfig<T> {
+            return EditApiConfig(
+                loadSetup(dc2fEditApiConfig.property(CONFIG_SETUP_CLASS).getString()),
+                dc2fEditApiConfig.property(CONFIG_SECRET).getString(),
+                requireNotNull(FileSystems.getDefault().getPath(dc2fEditApiConfig.property(CONTENT_DIRECTORY).getString())),
+                dc2fEditApiConfig.propertyOrNull(CONFIG_STATIC_DIRECTORY)?.getString()
+            )
+        }
+    }
+
+    val deps by lazy {
+        Deps(this)
+    }
+}
+
 
 @Suppress("EXPERIMENTAL_API_USAGE")
-class Deps<T: Website<*>>(dc2fEditApiConfig: ApplicationConfig) {
-//    init {
+class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>) {
+    //    init {
 //        loadContent()
 //    }
-    val setup = loadSetup<T>(dc2fEditApiConfig.property(CONFIG_SETUP_CLASS).getString())
+    val setup = editApiConfig.setup
 
-    val content : LoadedContent<T> get() = rootContent
-    val context : LoaderContext get() = loaderContext ?: throw InvalidStateException("Not yet ready.")
-    val messageTransformer : MessageTransformer = SimpleMessageTransformer(dc2fEditApiConfig.property(CONFIG_SECRET).getString())
-    val contentRootPath = requireNotNull(FileSystems.getDefault().getPath(dc2fEditApiConfig.property(CONTENT_DIRECTORY).getString()))
+    val content: LoadedContent<T> get() = rootContent
+    val context: LoaderContext
+        get() = loaderContext ?: throw InvalidStateException("Not yet ready.")
+    val messageTransformer: MessageTransformer =
+        SimpleMessageTransformer(editApiConfig.secret)
+    val contentRootPath = editApiConfig.contentRoot
     private var loaderContext: LoaderContext? = null
     private var rootContent: LoadedContent<T> = loadContent()
     val urlConfig: UrlConfig get() = setup.urlConfig(rootContent.content)
 
-    val staticDirectory: String? = dc2fEditApiConfig.propertyOrNull(CONFIG_STATIC_DIRECTORY)?.getString()
+    val staticDirectory: String? =
+        editApiConfig.staticRoot
+
+    private val onRefreshListeners = mutableListOf<suspend () -> Unit>()
 
     private fun loadContent(): LoadedContent<T> {
         val loader = ContentLoader(setup.rootContent)
@@ -66,14 +94,25 @@ class Deps<T: Website<*>>(dc2fEditApiConfig: ApplicationConfig) {
             @Suppress("UNCHECKED_CAST")
             this.rootContent = loadedWebsite
             this.loaderContext = context
-            logger.debug { "Loaded website $loadedWebsite" }
+            logger.debug { "Loaded website ${loadedWebsite.content.name}" }
             loadedWebsite
         }
     }
 
-    fun reload(content: ContentDef) {
+    fun registerOnRefreshListener(listener: suspend () -> Unit) {
+        onRefreshListeners.add(listener)
+    }
+    fun removeOnRefreshListener(listener: suspend () -> Unit) =
+        onRefreshListeners.remove(listener)
+
+    suspend fun reload(content: ContentDef) {
 //        loaderContext?.close()
 //        loadContent()
-        context.reload(content)
+        try {
+            context.reload(content)
+            onRefreshListeners.forEach { it() }
+        } catch (e: Exception) {
+            logger.error(e) { "Error while reloading content." }
+        }
     }
 }
