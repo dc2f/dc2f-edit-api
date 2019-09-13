@@ -8,6 +8,7 @@
  */
 
 rootProject.name = "dc2f-edit-api"
+include("dc2f-ktor")
 
 //includeBuild("./deps/dc2f.kt")
 //includeBuild("./deps/finalyzer-dc2f-site")

@@ -1,4 +1,4 @@
-package com.dc2f.api.edit
+package com.dc2f.api.edit.ktor
 
 import io.ktor.application.*
 import io.ktor.features.origin

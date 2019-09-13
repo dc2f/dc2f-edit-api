@@ -3,12 +3,10 @@ package com.dc2f.api.edit
 import com.dc2f.*
 import com.dc2f.render.UrlConfig
 import com.dc2f.util.*
-import io.ktor.config.ApplicationConfig
-import io.ktor.sessions.SessionTransportTransformerMessageAuthentication
 import mu.KotlinLogging
 import sun.plugin.dom.exception.InvalidStateException
 import java.io.Closeable
-import java.nio.file.*
+import java.nio.file.Path
 import java.util.*
 
 private val logger = KotlinLogging.logger {}
@@ -37,29 +35,18 @@ class SimpleMessageTransformer(secret: String) : MessageTransformer {
 
 }
 
-private fun <T : Website<*>> loadSetup(className: String): Dc2fSetup<T> {
+fun <T : Website<*>> loadSetup(className: String): Dc2fSetup<T> {
     val setup = Class.forName(className).newInstance()
     @Suppress("UNCHECKED_CAST")
     return setup as Dc2fSetup<T>
 }
 
-@Suppress("EXPERIMENTAL_API_USAGE")
 class EditApiConfig<T : Website<*>>(
     val setup: Dc2fSetup<T>,
     val secret: String,
     val contentRoot: Path,
     val staticRoot: String?
 ): Closeable {
-    companion object {
-        fun <T : Website<*>> parse(dc2fEditApiConfig: ApplicationConfig): EditApiConfig<T> {
-            return EditApiConfig(
-                loadSetup(dc2fEditApiConfig.property(CONFIG_SETUP_CLASS).getString()),
-                dc2fEditApiConfig.property(CONFIG_SECRET).getString(),
-                requireNotNull(FileSystems.getDefault().getPath(dc2fEditApiConfig.property(CONTENT_DIRECTORY).getString())),
-                dc2fEditApiConfig.propertyOrNull(CONFIG_STATIC_DIRECTORY)?.getString()
-            )
-        }
-    }
 
     val deps by lazy {
         Deps(this)
