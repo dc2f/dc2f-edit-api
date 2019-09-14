@@ -286,6 +286,9 @@ class ApiHandler(val deps: Deps<*>) {
         )
     }
 
+    suspend fun updatePath(content: ContentDef, metadata: ContentDefMetadata, modificationString: String): String =
+        updatePath(content, metadata, om.readValue<ContentModification>(modificationString))
+
     suspend fun updatePath(content: ContentDef, metadata: ContentDefMetadata, modification: ContentModification): String {
         val reflection = reflectionForType(content::class)
         val updates = modification.updates

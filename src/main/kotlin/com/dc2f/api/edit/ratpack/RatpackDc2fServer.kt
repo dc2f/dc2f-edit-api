@@ -71,21 +71,21 @@ class RatpackDc2fServer<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WE
                     ctx.redirect("/api/render/")
                 }
 
-                chain.get("/type/") { ctx ->
+                chain.get("api/type/") { ctx ->
                     val types = ctx.request.queryParams.getAll("type")
                     ctx.respondJson(deps.handler.reflectTypes(types))
                 }
-                chain.get("/reflection/:path:.*") { ctx->
+                chain.get("api/reflect/:path:.*") { ctx->
                     val (content, metadata) = deps.handler.dataForUrlPath(ctx.path)
                     ctx.respondJson(deps.handler.reflectContentPath(content, metadata))
                 }
-                chain.get("/createChild/begin/:path:.*") { ctx ->
+                chain.get("api/createChild/begin/:path:.*") { ctx ->
                     val (content, metadata) = deps.handler.dataForUrlPath(ctx.path)
                     ctx.request.body.then {
                         deps.handler.createChildBegin(content, metadata, it.text)
                     }
                 }
-                chain.get("/createChild/upload/:path:.*") { ctx ->
+                chain.get("api/createChild/upload/:path:.*") { ctx ->
                     val transactionValue = ctx.request.headers[Dc2fApi.HEADER_TRANSACTION]
                     ctx.parse(Form::class.java).then { form ->
                         val files = form.files()
@@ -98,6 +98,14 @@ class RatpackDc2fServer<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WE
                                 }
 
                             })
+                        }
+                    }
+                }
+                chain.patch("api/update/:path:.*") { ctx ->
+                    val (content, metadata) = deps.handler.dataForUrlPath(ctx.path)
+                    ctx.request.body.then {
+                        GlobalScope.launch {
+                            deps.handler.updatePath(content, metadata, it.text)
                         }
                     }
                 }
