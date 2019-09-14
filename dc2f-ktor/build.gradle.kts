@@ -25,8 +25,7 @@ tasks.withType<KotlinCompile> {
 val compileKotlin by tasks.getting(KotlinCompile::class) {
     kotlinOptions {
         freeCompilerArgs = listOf(
-            "-Xuse-experimental=kotlin.Experimental",
-            "-Xuse-experimental=io.ktor.locations.KtorExperimentalLocationsAPI"
+            "-Xuse-experimental=kotlin.Experimental"
         )
     }
 }

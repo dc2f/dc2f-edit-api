@@ -41,6 +41,10 @@ fun <T : Website<*>> loadSetup(className: String): Dc2fSetup<T> {
     return setup as Dc2fSetup<T>
 }
 
+/**
+ * [secret] is only used for signing sessions. SInce we are not running in a public internet,
+ * who cares? :-)
+ */
 class EditApiConfig<T : Website<*>>(
     val setup: Dc2fSetup<T>,
     val secret: String,

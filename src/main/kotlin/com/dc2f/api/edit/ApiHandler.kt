@@ -201,6 +201,15 @@ class ApiHandler(val deps: Deps<*>) {
     fun createChildBegin(
         content: ContentDef,
         metadata: ContentDefMetadata,
+        createJsonString: String
+    ): String {
+        val create = om.readValue<ContentCreate>(createJsonString)
+        return createChildBegin(content, metadata, create)
+    }
+
+    fun createChildBegin(
+        content: ContentDef,
+        metadata: ContentDefMetadata,
         create: ContentCreate
     ): String {
         val parentFsPath = requireNotNull(metadata.fsPath?.parent)

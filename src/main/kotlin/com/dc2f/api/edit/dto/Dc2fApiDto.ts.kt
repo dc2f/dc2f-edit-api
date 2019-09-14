@@ -10,3 +10,9 @@ open class ErrorResponse(val message: String)
 data class InspectDto(
     val content: ContentDef
 )
+
+class Dc2fApi {
+    companion object {
+        const val HEADER_TRANSACTION = "x-transaction"
+    }
+}

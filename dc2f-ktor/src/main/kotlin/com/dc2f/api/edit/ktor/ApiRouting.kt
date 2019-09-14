@@ -4,6 +4,7 @@ package com.dc2f.api.edit.ktor
 
 import com.dc2f.*
 import com.dc2f.api.edit.*
+import com.dc2f.api.edit.dto.Dc2fApi
 import io.ktor.application.*
 import io.ktor.http.content.*
 import io.ktor.request.*
@@ -58,7 +59,7 @@ fun Route.apiRouting(deps: Deps<*>) {
         }
 
         post("/createChild/upload/{path...}") {
-            val transactionValue = requireNotNull(call.request.header("x-transaction"))
+            val transactionValue = requireNotNull(call.request.header(Dc2fApi.HEADER_TRANSACTION))
 
             val multipart = call.receiveMultipart()
 
