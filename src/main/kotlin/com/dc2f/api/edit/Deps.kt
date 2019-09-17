@@ -35,18 +35,12 @@ class SimpleMessageTransformer(secret: String) : MessageTransformer {
 
 }
 
-fun <T : Website<*>> loadSetup(className: String): Dc2fSetup<T> {
-    val setup = Class.forName(className).newInstance()
-    @Suppress("UNCHECKED_CAST")
-    return setup as Dc2fSetup<T>
-}
-
 /**
  * [secret] is only used for signing sessions. SInce we are not running in a public internet,
  * who cares? :-)
  */
 class EditApiConfig<T : Website<*>>(
-    val setup: Dc2fSetup<T>,
+    val setup: Dc2fConfig<T>,
     val secret: String,
     val contentRoot: Path,
     val staticRoot: String?
@@ -79,7 +73,7 @@ class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>): Closeable {
     val contentRootPath = editApiConfig.contentRoot
     private var loaderContext: LoaderContext? = null
     private var rootContent: LoadedContent<T> = loadContent()
-    val urlConfig: UrlConfig get() = setup.urlConfig(rootContent.content)
+    val urlConfig: UrlConfig get() = setup.urlConfigFromRootContent(rootContent.content)
 
     val staticDirectory: String? =
         editApiConfig.staticRoot
@@ -90,7 +84,7 @@ class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>): Closeable {
     }
 
     private fun loadContent(): LoadedContent<T> {
-        val loader = ContentLoader(setup.rootContent)
+        val loader = ContentLoader(setup.rootContentType)
         val (loadedWebsite, context) = loader.loadWithoutClose(contentRootPath)
 
         @Suppress("UNCHECKED_CAST")
