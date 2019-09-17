@@ -96,7 +96,6 @@ class RatpackDc2fServer<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WE
                                         partHandler(UploadedFile(file.value.fileName) { file.value.inputStream })
                                     }
                                 }
-
                             })
                         }
                     }
