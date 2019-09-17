@@ -1,7 +1,9 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 group = "com.dc2f"
-version = "0.0.1-SNAPSHOT"
+if (version == "unspecified") {
+    version = "0.1.3-SNAPSHOT"
+}
 
 val jacksonVersion = "2.9.9"
 
@@ -47,7 +49,7 @@ dependencies {
     compile("ch.qos.logback:logback-classic:1.2.1")
 
     // dc2f
-    implementation("com.dc2f:dc2f:0.1.3-SNAPSHOT")
+    implementation("com.dc2f:dc2f:$version")
 //    implementation("app.anlage.site:finalyzer-dc2f-site:0.0.1-SNAPSHOT")
 
     // yaml deserialize
