@@ -118,7 +118,7 @@ class RatpackDc2fServer<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WE
                 }
                 chain.get("static/:path:.*") { ctx ->
                     val path = ctx.pathTokens["path"]
-                    val filePath = FileSystems.getDefault().getPath("./tmpDir").resolve(path)
+                    val filePath = deps.staticTempOutputDirectory.resolve(path)
                     when {
                         Files.exists(filePath) -> ctx.render(filePath)
                         deps.staticDirectory != null -> {

@@ -36,4 +36,5 @@ build
 /.dc2f
 /lsp
 /tools/dc2f-site-gh-pages
+/dc2f-ktor/out
 

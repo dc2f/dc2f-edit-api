@@ -6,7 +6,7 @@ import com.dc2f.util.*
 import mu.KotlinLogging
 import sun.plugin.dom.exception.InvalidStateException
 import java.io.Closeable
-import java.nio.file.Path
+import java.nio.file.*
 import java.util.*
 
 private val logger = KotlinLogging.logger {}
@@ -78,6 +78,10 @@ class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>): Closeable {
     val staticDirectory: String? =
         editApiConfig.staticRoot
 
+    val staticTempOutputDirectory : Path by lazy {
+        FileSystems.getDefault().getPath("./.dc2f/tmpDir").also { Files.createDirectories(it) }
+    }
+
     private val onRefreshListeners = mutableListOf<suspend () -> Unit>()
     val handler by lazy {
         ApiHandler(this)
@@ -96,7 +100,11 @@ class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>): Closeable {
 
     override fun close() {
         logger.info("closing.")
-        loaderContext?.close()
+        try {
+            loaderContext?.close()
+        } catch (e: Throwable) {
+            logger.warn(e) { "error while closing loader context." }
+        }
         onRefreshListeners.clear()
     }
 

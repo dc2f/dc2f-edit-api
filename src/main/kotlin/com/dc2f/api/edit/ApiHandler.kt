@@ -59,13 +59,30 @@ class CreateTransaction(
 class ApiHandler(val deps: Deps<*>) {
     val typeReflectionCache =
         mutableMapOf<KClass<out ContentDef>, ContentDefReflection<out ContentDef>>()
+    var contentByRenderPath: Map<RenderPath, ContentPath> = indexRenderPaths()
+
+    init {
+        deps.registerOnRefreshListener {
+            contentByRenderPath = indexRenderPaths()
+        }
+    }
 
     fun <T : ContentDef> reflectionForType(clazz: KClass<out T>) =
         typeReflectionCache.computeIfAbsent(clazz) { ContentDefReflection(it) }
 
-    fun dataForUrlPath(path: String): Pair<ContentDef, ContentDefMetadata> {
-        val contentPath = ContentPath.parse(path)
+    private fun indexRenderPaths(): Map<RenderPath, ContentPath> {
+        // mock renderer to resolve render paths.
+        val renderer = createRenderer(StringWriter())
+        return deps.context.contentByPath.map { entry ->
+            renderer.findRenderPath(entry.value) to entry.key
+        }.toMap()
+    }
 
+    fun dataForUrlPath(path: String): Pair<ContentDef, ContentDefMetadata> {
+//        val contentPath = ContentPath.parse(path)
+
+        val contentPath = contentByRenderPath[RenderPath.parse(path)]
+            ?: throw NotFoundException("Unable to find rootContent by render path. $path")
         val content =
             deps.context.contentByPath[contentPath]
                 ?: throw NotFoundException("Unable to find rootContent by path.")
@@ -82,8 +99,7 @@ class ApiHandler(val deps: Deps<*>) {
         return content to metadata
     }
 
-    fun renderContentToString(content: ContentDef, metadata: ContentDefMetadata): String {
-        val out = StringWriter()
+    private fun createRenderer(out: StringWriter): SinglePageStreamRenderer {
         val urlConfigTmp = deps.urlConfig.run {
             UrlConfig(
                 protocol, host, "api/render/"
@@ -94,13 +110,18 @@ class ApiHandler(val deps: Deps<*>) {
             override val staticFilesPrefix: String
                 get() = "static/"
         }
-        SinglePageStreamRenderer(
+        return SinglePageStreamRenderer(
             deps.setup.theme,
             deps.context,
             urlConfig,
             AppendableOutput(out),
-            FileSystems.getDefault().getPath("./tmpDir")
-        ).renderRootContent(
+            deps.staticTempOutputDirectory
+        )
+    }
+
+    fun renderContentToString(content: ContentDef, metadata: ContentDefMetadata): String {
+        val out = StringWriter()
+        createRenderer(out).renderRootContent(
             content,
             metadata,
             OutputType.html

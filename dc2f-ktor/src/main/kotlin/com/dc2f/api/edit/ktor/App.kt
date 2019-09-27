@@ -6,6 +6,7 @@ package com.dc2f.api.edit.ktor
 import com.dc2f.Website
 import com.dc2f.api.edit.*
 import com.dc2f.api.edit.dto.ErrorResponse
+import com.dc2f.util.Dc2fConfig
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.ktor.application.*
 import io.ktor.config.ApplicationConfig
@@ -35,6 +36,11 @@ fun <T : Website<*>> parse(dc2fEditApiConfig: ApplicationConfig): EditApiConfig<
         requireNotNull(FileSystems.getDefault().getPath(dc2fEditApiConfig.property(CONTENT_DIRECTORY).getString())),
         dc2fEditApiConfig.propertyOrNull(CONFIG_STATIC_DIRECTORY)?.getString()
     )
+}
+
+fun <T: Website<*>> loadSetup(className: String): Dc2fConfig<T> {
+    @Suppress("UNCHECKED_CAST")
+    return EditApiConfig::class.java.classLoader.loadClass(className).newInstance() as Dc2fConfig<T>
 }
 
 @Suppress("unused")

@@ -30,11 +30,11 @@ suspend fun notifyMembers() {
 fun Route.apiRoutingRender(deps: Deps<*>) {
     get("/static/{path...}") {
         val path = call.parameters.getAll("path")?.joinToString("/")
-        val filePath = FileSystems.getDefault().getPath("./tmpDir").resolve(path)
+        val filePath = deps.staticTempOutputDirectory.resolve(path)
         when {
             Files.exists(filePath) -> call.respondFile(filePath.toFile())
             deps.staticDirectory != null -> {
-                val fallback = FileSystems.getDefault().getPath(deps.staticDirectory).resolve(path)
+                val fallback = FileSystems.getDefault().getPath(deps.staticDirectory!!).resolve(path)
                 call.respondFile(fallback.toFile())
             }
             else -> {
