@@ -81,7 +81,7 @@ class ApiHandler(val deps: Deps<*>) {
     fun dataForUrlPath(path: String): Pair<ContentDef, ContentDefMetadata> {
 //        val contentPath = ContentPath.parse(path)
 
-        val contentPath = contentByRenderPath[RenderPath.parse(path)]
+        val contentPath = contentByRenderPath[RenderPath.parseLeafPath(path.takeUnless { it.isBlank() } ?: "/")]
             ?: throw NotFoundException("Unable to find rootContent by render path. $path")
         val content =
             deps.context.contentByPath[contentPath]
