@@ -2,13 +2,10 @@ package com.dc2f.api.edit
 
 import com.dc2f.*
 import com.dc2f.render.UrlConfig
-import com.dc2f.util.Dc2fConfig
-import com.dc2f.util.isLazyInitialized
+import com.dc2f.util.*
 import mu.KotlinLogging
 import java.io.Closeable
-import java.nio.file.FileSystems
-import java.nio.file.Files
-import java.nio.file.Path
+import java.nio.file.*
 import java.util.*
 
 private val logger = KotlinLogging.logger {}
@@ -61,7 +58,7 @@ class EditApiConfig<T : Website<*>>(
 
 
 @Suppress("EXPERIMENTAL_API_USAGE")
-class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>): Closeable {
+class Deps<T : Website<*>>(editApiConfig: EditApiConfig<T>): Closeable {
     //    init {
 //        loadContent()
 //    }
@@ -113,15 +110,21 @@ class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>): Closeable {
     fun registerOnRefreshListener(listener: suspend () -> Unit) {
         onRefreshListeners.add(listener)
     }
+
+    @Suppress("unused")
     fun removeOnRefreshListener(listener: suspend () -> Unit) =
         onRefreshListeners.remove(listener)
+
+    suspend fun triggerRefreshListeners() {
+        onRefreshListeners.forEach { it() }
+    }
 
     suspend fun reload(content: ContentDef) {
 //        loaderContext?.close()
 //        loadContent()
         try {
             context.reload(content)
-            onRefreshListeners.forEach { it() }
+            triggerRefreshListeners()
         } catch (e: Exception) {
             logger.error(e) { "Error while reloading content." }
         }

@@ -9,11 +9,9 @@ import org.reactivestreams.*
 import ratpack.form.Form
 import ratpack.handling.Context
 import ratpack.http.Status
-import ratpack.service.Service
-import ratpack.server.*
-import ratpack.service.StartEvent
-import ratpack.service.StopEvent
-import ratpack.websocket.WebSockets.*
+import ratpack.server.RatpackServer
+import ratpack.service.*
+import ratpack.websocket.WebSockets.websocketBroadcast
 import java.nio.file.*
 
 private val logger = KotlinLogging.logger {}
@@ -46,7 +44,11 @@ class RatpackDc2fServer<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WE
     fun serve(port: Int? = null) {
         val deps = editApiConfig.deps
         deps.registerOnRefreshListener {
-            reloadPublisher.publish("reload")
+            try {
+                reloadPublisher.publish("reload")
+            } catch (e: Exception) {
+                logger.warn { "Error while reloading. Ignoring." }
+            }
         }
         logger.info("Serving ...")
         RatpackServer.start { server ->
@@ -117,7 +119,7 @@ class RatpackDc2fServer<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WE
                     ctx.response.send("text/html", deps.handler.renderContentToString(content, metadata))
                 }
                 chain.get("static/:path:.*") { ctx ->
-                    val path = ctx.pathTokens["path"]
+                    val path = requireNotNull(ctx.pathTokens["path"])
                     val filePath = deps.staticTempOutputDirectory.resolve(path)
                     when {
                         Files.exists(filePath) -> ctx.render(filePath)
