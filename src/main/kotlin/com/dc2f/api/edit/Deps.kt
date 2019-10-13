@@ -2,11 +2,13 @@ package com.dc2f.api.edit
 
 import com.dc2f.*
 import com.dc2f.render.UrlConfig
-import com.dc2f.util.*
+import com.dc2f.util.Dc2fConfig
+import com.dc2f.util.isLazyInitialized
 import mu.KotlinLogging
-import sun.plugin.dom.exception.InvalidStateException
 import java.io.Closeable
-import java.nio.file.*
+import java.nio.file.FileSystems
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.*
 
 private val logger = KotlinLogging.logger {}
@@ -67,7 +69,7 @@ class Deps<T : Website<*>>(val editApiConfig: EditApiConfig<T>): Closeable {
 
     val content: LoadedContent<T> get() = rootContent
     val context: LoaderContext
-        get() = loaderContext ?: throw InvalidStateException("Not yet ready.")
+        get() = loaderContext ?: throw IllegalStateException("Not yet ready.")
     val messageTransformer: MessageTransformer =
         SimpleMessageTransformer(editApiConfig.secret)
     val contentRootPath = editApiConfig.contentRoot
