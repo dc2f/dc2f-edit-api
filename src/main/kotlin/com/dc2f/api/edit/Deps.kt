@@ -124,7 +124,6 @@ class Deps<T : Website<*>>(editApiConfig: EditApiConfig<T>): Closeable {
 //        loadContent()
         try {
             context.reload(content)
-            triggerRefreshListeners()
         } catch (e: Exception) {
             logger.error(e) { "Error while reloading content." }
         }
