@@ -358,6 +358,10 @@ class ApiHandler(val deps: Deps<*>) {
         }
         return om.writeValueAsString(mapOf("status" to "ok"))
     }
+
+    fun debug(path: String): String {
+        return deps.content.context.contentByPath.keys.joinToString("\n") { it.toString() }
+    }
 }
 
 interface Dc2fUpload {

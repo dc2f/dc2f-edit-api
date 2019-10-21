@@ -73,6 +73,9 @@ class RatpackDc2fServer<WEBSITE: Website<*>>(val editApiConfig: EditApiConfig<WE
                     ctx.redirect("/api/render/")
                 }
 
+                chain.get("api/debug/:path:.*") { ctx ->
+                    ctx.render(deps.handler.debug(ctx.path))
+                }
                 chain.get("api/type/") { ctx ->
                     val types = ctx.request.queryParams.getAll("type")
                     ctx.respondJson(deps.handler.reflectTypes(types))
