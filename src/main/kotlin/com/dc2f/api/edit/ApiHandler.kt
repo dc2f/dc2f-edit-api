@@ -17,6 +17,7 @@ import mu.KotlinLogging
 import java.io.*
 import java.nio.file.*
 import java.time.LocalDate
+import kotlin.concurrent.read
 import kotlin.reflect.KClass
 import kotlin.reflect.full.isSubclassOf
 
@@ -81,22 +82,27 @@ class ApiHandler(val deps: Deps<*>) {
     fun dataForUrlPath(path: String): Pair<ContentDef, ContentDefMetadata> {
 //        val contentPath = ContentPath.parse(path)
 
-        val contentPath = contentByRenderPath[RenderPath.parseLeafPath(path.takeUnless { it.isBlank() } ?: "/")]
-            ?: throw NotFoundException("Unable to find rootContent by render path. $path")
-        val content =
-            deps.context.contentByPath[contentPath]
-                ?: throw NotFoundException("Unable to find rootContent by path.")
-        val metadata = if (deps.content.metadata.path == contentPath) {
-            deps.content.metadata
-        } else {
-            deps.context.metadata[content]
+        logger.info { "Phase: ${deps.context.phase}" }
+        deps.refreshLock.read {
+            logger.info { "Phase: ${deps.context.phase}" }
+
+            val contentPath = contentByRenderPath[RenderPath.parseLeafPath(path.takeUnless { it.isBlank() } ?: "/")]
+                    ?: throw NotFoundException("Unable to find rootContent by render path. $path")
+            val content =
+                    deps.context.contentByPath[contentPath]
+                            ?: throw NotFoundException("Unable to find rootContent by path.")
+            val metadata = if (deps.content.metadata.path == contentPath) {
+                deps.content.metadata
+            } else {
+                deps.context.metadata[content]
 //        deps.content.metadata.childrenMetadata[content]
+            }
+                    ?: throw NotFoundException("Unable to find metadata.")
+
+            require(metadata.path == contentPath)
+
+            return content to metadata
         }
-            ?: throw NotFoundException("Unable to find metadata.")
-
-        require(metadata.path == contentPath)
-
-        return content to metadata
     }
 
     private fun createRenderer(out: StringWriter): SinglePageStreamRenderer {

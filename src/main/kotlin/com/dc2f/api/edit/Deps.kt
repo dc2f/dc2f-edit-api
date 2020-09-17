@@ -2,11 +2,15 @@ package com.dc2f.api.edit
 
 import com.dc2f.*
 import com.dc2f.render.UrlConfig
-import com.dc2f.util.*
+import com.dc2f.util.Dc2fConfig
+import com.dc2f.util.isLazyInitialized
 import mu.KotlinLogging
 import java.io.Closeable
-import java.nio.file.*
+import java.nio.file.FileSystems
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.*
+import java.util.concurrent.locks.ReentrantReadWriteLock
 
 private val logger = KotlinLogging.logger {}
 
@@ -80,6 +84,9 @@ class Deps<T : Website<*>>(editApiConfig: EditApiConfig<T>): Closeable {
     val staticTempOutputDirectory : Path by lazy {
         FileSystems.getDefault().getPath("./.dc2f/tmpDir").also { Files.createDirectories(it) }
     }
+
+    /// Lock which will be acquired when we reload data.
+    val refreshLock = ReentrantReadWriteLock()
 
     private val onRefreshListeners = mutableListOf<suspend () -> Unit>()
     val handler by lazy {
