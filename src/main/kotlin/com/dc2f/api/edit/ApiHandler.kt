@@ -125,14 +125,20 @@ class ApiHandler(val deps: Deps<*>) {
         )
     }
 
-    fun renderContentToString(content: ContentDef, metadata: ContentDefMetadata): String {
-        val out = StringWriter()
-        createRenderer(out).renderRootContent(
-            content,
-            metadata,
-            OutputType.html
-        )
-        return out.toString().replace("</head>", "<script>$jsInject</script></head>")
+    fun renderContentToString(
+      content: ContentDef,
+      metadata: ContentDefMetadata
+    ): String {
+        deps.refreshLock.read {
+            val out = StringWriter()
+            createRenderer(out).renderRootContent(
+              content,
+              metadata,
+              OutputType.html
+            )
+            return out.toString()
+              .replace("</head>", "<script>$jsInject</script></head>")
+        }
     }
 
     fun reflectTypes(types: List<String>): String {
