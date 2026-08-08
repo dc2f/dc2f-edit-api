@@ -8,7 +8,14 @@
  */
 
 rootProject.name = "dc2f-edit-api"
-include("dc2f-ktor")
+
+// dc2f-ktor is excluded, not deleted. It is an unfinished Ktor alternative to
+// the ratpack server: 4 files, untouched since 2019-09-27, nothing depends on
+// it, and it declares "com.dc2f:dc2f:[0.1.3-SNAPSHOT" -- a malformed version
+// range that cannot resolve. It also still uses jcenter(), compile() and
+// ktor 1.2.0, so it would need real work to build under Gradle 9 / Kotlin 2.4.
+// Re-enable and modernise it if it is ever wanted.
+//include("dc2f-ktor")
 
 //includeBuild("./deps/dc2f.kt")
 //includeBuild("./deps/finalyzer-dc2f-site")

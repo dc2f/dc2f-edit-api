@@ -12,8 +12,12 @@ val jacksonVersion = "2.9.9"
 
 plugins {
     // Apply the Kotlin JVM plugin to add support for Kotlin on the JVM.
-    id("org.jetbrains.kotlin.jvm").version("1.9.25")
-    id("io.ratpack.ratpack-java").version("1.7.3")
+    id("org.jetbrains.kotlin.jvm").version("2.4.10")
+    // The io.ratpack.ratpack-java plugin is gone: every release of it, up to
+    // and including 2.0.0-rc-1, calls the `compile` configuration internally,
+    // which Gradle removed in 7.0. It only worked this long because the Kotlin
+    // plugin re-registered `compile`, and Kotlin 1.9 stopped. ratpack-core is
+    // declared directly below instead.
 
     // Apply the application plugin to add support for building a CLI application.
     application
@@ -25,20 +29,37 @@ plugins {
 }
 
 tasks.withType<KotlinCompile> {
-    kotlinOptions.jvmTarget = "1.8"
-    // "enable" was removed in Kotlin 1.5; "all" is the closest equivalent.
-    kotlinOptions.freeCompilerArgs = listOf("-Xjvm-default=all")
+    // kotlinOptions was removed in Kotlin 2.2; compilerOptions replaces it.
+    // -Xjvm-default likewise became -jvm-default, where "no-compatibility"
+    // corresponds to the old "all".
+    compilerOptions {
+        freeCompilerArgs.add("-jvm-default=no-compatibility")
+    }
+}
+
+// Pins both the Java and Kotlin targets together. Setting only
+// compilerOptions.jvmTarget lets compileJava follow whatever JDK is running and
+// Gradle then rejects the mismatch. Gradle 9 requires JDK 17 to run anyway.
+kotlin {
+    jvmToolchain(17)
 }
 
 repositories {
+    // jcenter() dropped: shut down in 2021 and removed in Gradle 9.
     mavenCentral()
-    // Use jcenter for resolving your dependencies.
-    // You can declare any Maven/Ivy/file repository here.
-    jcenter()
     maven("https://oss.sonatype.org/content/groups/public/")
 }
 
 dependencies {
+    // Was supplied by the io.ratpack.ratpack-java plugin, which had to go (see
+    // the plugins block). api, not implementation: RatpackServer and friends
+    // appear in this module's public API.
+    // 1.7.3, matching the version the removed plugin applied -- not the newest
+    // 1.x. Ratpack drags in its own Jackson, and 1.9.0 pulled one new enough to
+    // change YAMLGenerator._writeScalar's signature out from under
+    // Dc2fYAMLFactory. Bumping ratpack is a separate change from this migration.
+    api("io.ratpack:ratpack-core:1.7.3")
+
     // Use the Kotlin JDK 8 standard library.
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
     implementation(kotlin("reflect"))
@@ -91,7 +112,8 @@ dependencies {
 
 application {
     // Define the main class for the application.
-    mainClassName = "com.dc2f.api.edit.AppKt"
+    // mainClassName was removed in Gradle 8.
+    mainClass.set("com.dc2f.api.edit.AppKt")
 }
 
 
