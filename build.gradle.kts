@@ -17,6 +17,9 @@ plugins {
 
     // Apply the application plugin to add support for building a CLI application.
     application
+    // Provides api(), which replaces the compile() configuration that the
+    // Kotlin plugin used to register and dropped in 1.9.
+    `java-library`
     `maven-publish`
     signing
 }
@@ -50,21 +53,21 @@ dependencies {
 //    implementation("io.ktor:ktor-websockets:$ktorVersion")
 
     // logging
-    compile("io.github.microutils:kotlin-logging:1.4.9")
-    compile("org.slf4j:jul-to-slf4j:1.7.25")
-    compile("ch.qos.logback:logback-classic:1.2.1")
+    api("io.github.microutils:kotlin-logging:1.4.9")
+    api("org.slf4j:jul-to-slf4j:1.7.25")
+    api("ch.qos.logback:logback-classic:1.2.1")
 
     // dc2f
     implementation("com.dc2f:dc2f:$version")
 //    implementation("app.anlage.site:finalyzer-dc2f-site:0.0.1-SNAPSHOT")
 
     // yaml deserialize
-    compile("com.fasterxml.jackson.core:jackson-annotations:$jacksonVersion")
-    compile("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:$jacksonVersion")
+    api("com.fasterxml.jackson.core:jackson-annotations:$jacksonVersion")
+    api("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:$jacksonVersion")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:$jacksonVersion")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:$jacksonVersion")
     constraints {
-        compile("org.yaml:snakeyaml:1.24")
+        api("org.yaml:snakeyaml:1.24")
         implementation("org.yaml:snakeyaml:1.24")
     }
 
