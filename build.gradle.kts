@@ -1,6 +1,10 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
-val dc2fVersion = "0.0.2"
+// Shared with dc2f.kt and dc2f-common: this module is pinned to the others at
+// its own `$version`, so a release only resolves if all three carry the same
+// number. 0.3.0 is the first one ahead of the 0.2.1 that has been on Central
+// since 2019. A release overrides it: -Pversion=0.3.0.
+val dc2fVersion = "0.3.0-SNAPSHOT"
 
 group = "com.dc2f"
 if (version == "unspecified") {
@@ -47,7 +51,9 @@ kotlin {
 repositories {
     // jcenter() dropped: shut down in 2021 and removed in Gradle 9.
     mavenCentral()
-    maven("https://oss.sonatype.org/content/groups/public/")
+    // Was oss.sonatype.org's public group, which 404s since OSSRH's EOL. Its
+    // half that mavenCentral() does not already cover is the snapshot repo.
+    maven("https://central.sonatype.com/repository/maven-snapshots/")
 }
 
 dependencies {
@@ -185,13 +191,24 @@ publishing {
     }
     repositories {
         maven {
-            val releasesRepoUrl = "https://oss.sonatype.org/service/local/staging/deploy/maven2/"
-            val snapshotsRepoUrl = "https://oss.sonatype.org/content/repositories/snapshots/"
+            name = "central"
+            // OSSRH was decommissioned on 2025-06-30; this is Sonatype's
+            // replacement for a maven-publish setup -- the same deploy layout
+            // in front of the Central Portal, authenticated with a Portal user
+            // token. See dc2f.kt's build.gradle.kts and _tools/central-publish.sh:
+            // a release staged here is invisible in the Portal until that script
+            // posts it, from the same IP that uploaded.
+            val releasesRepoUrl = "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/"
+            val snapshotsRepoUrl = "https://central.sonatype.com/repository/maven-snapshots/"
             url = uri(if (version.toString().endsWith("SNAPSHOT")) snapshotsRepoUrl else releasesRepoUrl)
             println("using $url")
             credentials {
-                username = project.properties["ossrhUsername"] as? String
-                password = project.properties["ossrhPassword"] as? String
+                username = (project.findProperty("centralUsername")
+                    ?: System.getenv("CENTRAL_TOKEN_USERNAME")
+                    ?: project.findProperty("ossrhUsername")) as? String
+                password = (project.findProperty("centralPassword")
+                    ?: System.getenv("CENTRAL_TOKEN_PASSWORD")
+                    ?: project.findProperty("ossrhPassword")) as? String
             }
 
         }
@@ -207,6 +224,13 @@ publishing {
 }
 
 signing {
+    // Away from this checkout there is no gpg keyring and no decrypted
+    // build_secrets.gradle.kts next door; the armoured key arrives in
+    // SIGNING_KEY instead.
+    val signingKey = System.getenv("SIGNING_KEY")
+    if (signingKey != null) {
+        useInMemoryPgpKeys(signingKey, System.getenv("SIGNING_PASSWORD"))
+    }
     sign(publishing.publications["mavenCentralJava"])
 }
 
