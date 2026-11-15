@@ -132,7 +132,14 @@ val secretConfig = file("../dc2f.kt/_tools/secrets/build_secrets.gradle.kts")
 if (secretConfig.exists()) {
     apply { from(secretConfig) }
     allprojects {
-        extra["signing.secretKeyRingFile"] = "../dc2f.kt/" + extra["signing.secretKeyRingFile"]
+        // Only if the file still sets it. dc2f.kt dropped signing.keyId,
+        // signing.password and signing.secretKeyRingFile when the signing key
+        // moved into sops, and the throwing accessor turned that into
+        // "Cannot get property 'signing.secretKeyRingFile'" for every task
+        // here as soon as the decrypted file exists next door.
+        (extra.properties["signing.secretKeyRingFile"] as? String)?.let {
+            extra["signing.secretKeyRingFile"] = "../dc2f.kt/$it"
+        }
     }
 } else {
     println("Warning: Secrets do not exist, maven publish will not be possible.")
